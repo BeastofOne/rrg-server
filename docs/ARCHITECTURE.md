@@ -233,6 +233,69 @@ graph TB
 
 ---
 
+## Lead Intake Pipeline (Detail)
+
+The lead intake flow (`f/switchboard/lead_intake`) is the most complex workflow. It spans Windmill, Gmail, Google Cloud Pub/Sub, and a Google Apps Script. Full documentation: [`docs/LEAD_INTAKE_PIPELINE.md`](LEAD_INTAKE_PIPELINE.md).
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#43a047', 'lineColor': '#43a047'}}}%%
+
+graph TB
+    subgraph WINDMILL_FLOW["WINDMILL: f/switchboard/lead_intake"]
+        direction TB
+        A["<b>Module A</b><br/>WiseAgent Lookup"]
+        B["<b>Module B</b><br/>Property Match"]
+        C["<b>Module C</b><br/>Dedup/Group"]
+        D["<b>Module D</b><br/>Generate Drafts<br/>+ Gmail API"]
+        E["<b>Module E</b><br/>Approval Gate<br/><i>⏸ SUSPEND</i>"]
+        F["<b>Module F</b><br/>Post-Approval<br/>(CRM + SMS)"]
+    end
+
+    subgraph GMAIL["GMAIL (teamgotcher@gmail.com)"]
+        DRAFTS["Drafts created<br/>with X-Lead-Intake-*<br/>headers"]
+        SEND["Jake sends draft"]
+        DELETE["Jake deletes draft"]
+    end
+
+    subgraph PUBSUB["GOOGLE CLOUD PUB/SUB"]
+        TOPIC["Topic: gmail-sent-<br/>notifications"]
+        PUSH["Push subscription<br/>→ Windmill webhook"]
+    end
+
+    subgraph DETECTION["DETECTION LAYER"]
+        WEBHOOK["gmail_pubsub_webhook<br/>(~2 sec, real-time)"]
+        APPSSCRIPT["Apps Script<br/>(daily 9 AM poll)"]
+    end
+
+    subgraph EXTERNAL["EXTERNAL"]
+        WISEAGENT["WiseAgent CRM"]
+        SMS["SMS Gateway<br/>(larry-sms-gateway)"]
+    end
+
+    A --> B --> C --> D
+    D -->|"Gmail API"| DRAFTS
+    D --> E
+    E -->|"Write signal to<br/>jake_signals"| E
+
+    SEND --> TOPIC --> PUSH --> WEBHOOK
+    WEBHOOK -->|"POST resume_url"| F
+
+    DELETE -.->|"Draft not found"| APPSSCRIPT
+    APPSSCRIPT -.->|"POST cancel_url"| CANCEL["Flow cancelled"]
+
+    F --> WISEAGENT
+    F --> SMS
+
+    style WINDMILL_FLOW fill:#e8f5e9,stroke:#43a047
+    style GMAIL fill:#e3f2fd,stroke:#42a5f5
+    style PUBSUB fill:#fff3e0,stroke:#ffb300
+    style DETECTION fill:#f3e5f5,stroke:#ab47bc
+    style EXTERNAL fill:#fce4ec,stroke:#ef5350
+    style E fill:#fff9c4,stroke:#f9a825
+```
+
+---
+
 ## Quick Reference
 
 ### Network
