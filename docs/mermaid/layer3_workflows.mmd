@@ -1,0 +1,73 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#fff3e0', 'primaryTextColor': '#e65100', 'primaryBorderColor': '#fb8c00'}}}%%
+
+graph TB
+    subgraph TRIGGERS["TRIGGERS"]
+        T1["Jake opens chat UI<br/>(rrg-server:8501)"]
+        T2["Jake sends NDA<br/>(via Claude Code)"]
+        T3["Recipient signs NDA<br/>(DocuSeal webhook)"]
+        T4["Windmill scheduled job<br/>or manual trigger"]
+        T5["Gmail push notification<br/>(Pub/Sub)"]
+    end
+
+    subgraph CHAT_FLOW["CHAT FLOW (jake-router :8501)"]
+        ROUTER_IN["jake-router receives message"]
+        ROUTE_DECIDE{"Route by<br/>target_node"}
+        PNL_WORKER["jake-pnl :8100<br/>P&L analysis"]
+        BROCHURE_WORKER["jake-brochure :8101<br/>Brochure generation"]
+        WM_FLOW["Windmill<br/>f/switchboard/message_router"]
+    end
+
+    subgraph NDA_FLOW["NDA FLOW (DocuSeal :3000)"]
+        NDA_SEND["DocuSeal creates submission<br/>Template ID 1 (NCND-RRG)"]
+        NDA_EMAIL["Signing link emailed<br/>via teamgotcher@gmail.com SMTP"]
+        NDA_SIGN["Recipient opens link<br/>and signs"]
+        NDA_WEBHOOK["DocuSeal fires<br/>submission.completed webhook"]
+        NDA_HANDLER["Windmill<br/>s/docuseal_nda/completed"]
+    end
+
+    subgraph WINDMILL_FLOWS["WINDMILL SWITCHBOARD (:8000)"]
+        WM_LEAD["f/switchboard/lead_intake<br/>Process incoming leads"]
+        WM_SIGNAL_W["s/switchboard/write_signal<br/>Create new signal"]
+        WM_SIGNAL_R["s/switchboard/read_signals<br/>Read pending signals"]
+        WM_SIGNAL_A["s/switchboard/act_signal<br/>Process a signal"]
+        WM_DRAFTS["s/switchboard/get_pending_draft_signals<br/>Check for drafts"]
+        WM_GMAIL["s/switchboard/gmail_pubsub_webhook<br/>Gmail push handler"]
+        WM_WATCH["s/switchboard/setup_gmail_watch<br/>Renew every 6 days"]
+    end
+
+    subgraph ENDPOINTS["EXTERNAL SERVICES"]
+        HUBSPOT["HubSpot CRM<br/>Contacts, Deals, Tasks, Notes"]
+        CLAUDE["Anthropic API<br/>LLM for chat workers"]
+        GMAIL["Gmail API<br/>jacob@resourcerealtygroupmi.com"]
+    end
+
+    %% Chat flow
+    T1 --> ROUTER_IN
+    ROUTER_IN --> ROUTE_DECIDE
+    ROUTE_DECIDE -->|"pnl"| PNL_WORKER
+    ROUTE_DECIDE -->|"brochure"| BROCHURE_WORKER
+    ROUTE_DECIDE -->|"windmill"| WM_FLOW
+    PNL_WORKER --> CLAUDE
+    BROCHURE_WORKER --> CLAUDE
+
+    %% NDA flow
+    T2 --> NDA_SEND
+    NDA_SEND --> NDA_EMAIL
+    NDA_EMAIL --> NDA_SIGN
+    T3 --> NDA_WEBHOOK
+    NDA_SIGN --> NDA_WEBHOOK
+    NDA_WEBHOOK --> NDA_HANDLER
+    NDA_HANDLER --> HUBSPOT
+
+    %% Windmill flows
+    T4 --> WM_LEAD
+    WM_LEAD --> HUBSPOT
+    T5 --> WM_GMAIL
+
+    %% Signal system
+    WM_SIGNAL_W --> WM_SIGNAL_R
+    WM_SIGNAL_R --> WM_SIGNAL_A
+
+    %% Gmail watch
+    WM_WATCH --> GMAIL
+    WM_GMAIL --> WM_SIGNAL_W
