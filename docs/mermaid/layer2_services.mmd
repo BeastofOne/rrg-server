@@ -1,91 +1,78 @@
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#43a047'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#43a047', 'lineColor': '#43a047'}}}%%
 
 graph TB
-    subgraph MAC["JAKE'S MAC (100.108.74.112)"]
-        subgraph MAC_SERVICES["Services"]
-            CLAUDE_CLI["Claude Code CLI<br/>(Interactive terminal)"]
-            CLAUDE_ENDPOINT["Claude Endpoint<br/>:8787 (pm2)"]
+    subgraph RRG["RRG-SERVER (100.97.86.99)"]
+        direction TB
+
+        subgraph FUNNEL["Tailscale Funnel — Public HTTPS"]
+            F_DS["rrg-server.tailc01f9b.ts.net<br/>→ DocuSeal :3000"]
+            F_WM["rrg-server.tailc01f9b.ts.net:8443<br/>→ Windmill :8000"]
         end
 
-        subgraph MAC_SOURCE["Source Code (~/Desktop/apps/)"]
-            SRC_ROUTER["jake-assistant/<br/>(jake-router source)"]
-            SRC_PNL["jake-pnl/<br/>(P&L source)"]
-            SRC_BROCHURE["jake-brochure/<br/>(Brochure source)"]
+        subgraph JAKE_APPS["jake-deploy (docker-compose.jake.yml)"]
+            ROUTER["<b>jake-router</b><br/>:8501 — Streamlit chat UI"]
+            PNL["<b>jake-pnl</b><br/>:8100 — P&L worker"]
+            BROCHURE["<b>jake-brochure</b><br/>:8101 — Brochure worker"]
         end
 
-        subgraph MCP_SERVERS["MCP Servers"]
-            MCP_HUBSPOT["HubSpot MCP"]
-            MCP_WINDMILL["Windmill MCP"]
+        subgraph WM_STACK["windmill (docker-compose.yml)"]
+            WM_SERVER["<b>windmill-server</b><br/>:8000 — Workflow engine"]
+            WM_WORKER["<b>windmill-worker</b><br/>Job executor"]
+            WM_DB["<b>postgres</b><br/>:5432 — Windmill DB"]
+        end
+
+        subgraph DS_STACK["docuseal (docker-compose.yml)"]
+            DOCUSEAL["<b>docuseal</b><br/>:3000 — NDA signing"]
         end
     end
 
-    subgraph RRG["RRG-SERVER (100.97.86.99)"]
-        subgraph DOCKER["Docker Containers"]
-
-            subgraph JAKE_APPS["Jake Apps (jake-deploy/)"]
-                ROUTER["jake-router<br/>:8501 (public)<br/>Streamlit chat UI<br/>2.15GB"]
-                PNL["jake-pnl<br/>:8100 (internal)<br/>P&L worker<br/>1.55GB"]
-                BROCHURE["jake-brochure<br/>:8101 (internal)<br/>Brochure worker<br/>4.91GB"]
-            end
-
-            subgraph DOCUSEAL_STACK["DocuSeal (docuseal/)"]
-                DOCUSEAL["docuseal<br/>:3000 (public + Funnel)<br/>Custom-built from source<br/>2.11GB"]
-            end
-
-            subgraph WINDMILL_STACK["Windmill (windmill/)"]
-                WM_SERVER["windmill-server<br/>:8000 (public + Funnel)<br/>5.18GB"]
-                WM_WORKER["windmill-worker<br/>(internal)"]
-                WM_DB["postgres:16-alpine<br/>:5432 (internal)<br/>395MB"]
-            end
-        end
-
-        subgraph FUNNEL["Tailscale Funnel (Public HTTPS)"]
-            FUNNEL_DS["rrg-server.tailc01f9b.ts.net<br/>→ :3000 (DocuSeal)"]
-            FUNNEL_WM["rrg-server.tailc01f9b.ts.net:8443<br/>→ :8000 (Windmill)"]
-        end
-
-        subgraph SERVER_SOURCE["Source Code (on server)"]
-            DS_SRC["docuseal-src/<br/>Custom DocuSeal fork<br/>Ruby 4.0.1 | 693MB"]
-        end
+    subgraph MAC["JAKE'S MAC (100.108.74.112)"]
+        CLAUDE_CLI["<b>Claude Code</b><br/>Interactive terminal"]
+        CLAUDE_EP["<b>claude-endpoint</b><br/>:8787 (pm2)"]
+        MCP_HS["HubSpot MCP"]
+        MCP_WM["Windmill MCP"]
     end
 
     subgraph LARRY["LARRY'S MAC (100.79.238.103)"]
-        SMS_GW["SMS Gateway<br/>:8080"]
+        SMS_GW["<b>SMS Gateway</b><br/>:8080"]
     end
 
     subgraph CLOUD["CLOUD SERVICES"]
-        HUBSPOT_API["HubSpot API"]
-        GMAIL_SMTP["Gmail SMTP<br/>(teamgotcher@gmail.com)"]
-        CLAUDE_API["Anthropic API"]
+        HUBSPOT["HubSpot API"]
+        GMAIL["Gmail SMTP"]
+        ANTHROPIC["Anthropic API"]
     end
 
-    %% Build pipeline (dashed = deploy path)
-    SRC_ROUTER -.->|"nix build → tar.gz → SCP"| ROUTER
-    SRC_PNL -.->|"nix build → tar.gz → SCP"| PNL
-    SRC_BROCHURE -.->|"nix build → tar.gz → SCP"| BROCHURE
-    DS_SRC -.->|"docker build on server"| DOCUSEAL
+    %% Funnel routing
+    F_DS --> DOCUSEAL
+    F_WM --> WM_SERVER
 
-    %% Claude CLI connections
-    CLAUDE_CLI <--> MCP_HUBSPOT
-    CLAUDE_CLI <--> MCP_WINDMILL
+    %% Jake apps internal routing
+    ROUTER --> PNL
+    ROUTER --> BROCHURE
+    ROUTER --> WM_SERVER
 
-    %% MCP to services
-    MCP_HUBSPOT <-->|"REST API"| HUBSPOT_API
-    MCP_WINDMILL <-->|"HTTP :8000<br/>via Tailscale"| WM_SERVER
-
-    %% Inter-container (windmill_default network)
-    ROUTER -->|"HTTP :8100"| PNL
-    ROUTER -->|"HTTP :8101"| BROCHURE
-    ROUTER -->|"HTTP :8000"| WM_SERVER
-
-    %% All jake apps use Claude API
-    ROUTER -->|"OAuth token"| CLAUDE_API
-    PNL -->|"OAuth token"| CLAUDE_API
-    BROCHURE -->|"OAuth token"| CLAUDE_API
-
-    %% DocuSeal
-    DOCUSEAL -->|"SMTP :587"| GMAIL_SMTP
+    %% All jake apps → Anthropic
+    ROUTER --> ANTHROPIC
+    PNL --> ANTHROPIC
+    BROCHURE --> ANTHROPIC
 
     %% Windmill internals
     WM_SERVER --> WM_DB
     WM_WORKER --> WM_DB
+
+    %% DocuSeal → Gmail
+    DOCUSEAL --> GMAIL
+
+    %% Claude CLI MCP connections
+    CLAUDE_CLI --> MCP_HS
+    CLAUDE_CLI --> MCP_WM
+    MCP_HS --> HUBSPOT
+    MCP_WM -->|"via Tailscale"| WM_SERVER
+
+    %% Styling
+    style FUNNEL fill:#fff8e1,stroke:#ffb300
+    style CLOUD fill:#f3e5f5,stroke:#ab47bc
+    style JAKE_APPS fill:#e3f2fd,stroke:#42a5f5
+    style WM_STACK fill:#e8f5e9,stroke:#66bb6a
+    style DS_STACK fill:#fce4ec,stroke:#ef5350
