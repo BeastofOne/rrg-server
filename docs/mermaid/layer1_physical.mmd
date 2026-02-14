@@ -1,0 +1,53 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e1f5fe', 'primaryTextColor': '#01579b', 'primaryBorderColor': '#0288d1', 'lineColor': '#0288d1'}}}%%
+
+graph TB
+    subgraph OFFICE["RRG OFFICE (192.168.1.x)"]
+        INTERNET["INTERNET"]
+
+        ROUTER["Office Router<br/>WiFi: SpectrumSetup-E0<br/>Password: ***REDACTED_WIFI_PASSWORD***"]
+
+        subgraph SERVER["RRG-SERVER (Always On)"]
+            SERVER_INFO["Dell Inspiron 3880<br/>i5-10400 @ 2.9GHz (12 threads) | 12GB RAM<br/>98GB disk (94% full) | Ubuntu 24.04.3 LTS"]
+            SERVER_LOCAL["Local: 192.168.1.31"]
+            SERVER_TS["Tailscale: 100.97.86.99"]
+        end
+
+        INTERNET <--> ROUTER
+        ROUTER <--> SERVER
+    end
+
+    subgraph TAILSCALE["TAILSCALE MESH OVERLAY (BeastofOne@tailc01f9b.ts.net)"]
+        TS_NOTE["All devices connect as peers<br/>regardless of physical location"]
+
+        subgraph TS_MAC["JAKE'S MAC"]
+            MAC_INFO["MacBook Air 2020 Intel<br/>i5 @ 1.1GHz | 16GB RAM<br/>macOS Sequoia 15.7.3"]
+            MAC_TS["100.108.74.112"]
+        end
+
+        subgraph TS_RRG["RRG-SERVER"]
+            TS_RRG_IP["100.97.86.99"]
+        end
+
+        subgraph TS_LARRY["LARRY'S MACBOOK PRO"]
+            LARRY_INFO["SMS Gateway host<br/>larrygotcher@"]
+            LARRY_TS["100.79.238.103"]
+        end
+    end
+
+    subgraph OFFLINE["OFFLINE / PAUSED"]
+        subgraph JAKE_HOME["JAKE'S HOME (192.168.0.x)"]
+            JAKE_SERVER["jake-server<br/>Dell Latitude E7440<br/>i5-4310U | 8GB RAM | 128GB SSD<br/>Ubuntu 24.04.2 LTS<br/>Tailscale: 100.87.241.99<br/>Local: 192.168.0.37<br/>OFFLINE 9+ days"]
+            JAKE_SERVER_1["jake-server-1<br/>100.64.223.78<br/>OFFLINE 9+ days"]
+        end
+
+        PHONE["Samsung Galaxy S22<br/>100.118.198.116<br/>OFFLINE 9+ days"]
+    end
+
+    %% Active connections
+    MAC_TS <-.->|"WireGuard<br/>SSH :22, HTTP"| TS_RRG_IP
+    TS_RRG_IP <-.->|"WireGuard<br/>SMS Gateway :8080"| LARRY_TS
+    MAC_TS <-.->|"WireGuard"| LARRY_TS
+    SERVER_TS ===|"same device"| TS_RRG_IP
+
+    %% Offline connections (dashed, greyed)
+    JAKE_SERVER ~~~ PHONE
