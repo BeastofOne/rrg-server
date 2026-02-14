@@ -14,40 +14,35 @@ The hardware and network topology connecting all devices.
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e1f5fe', 'primaryTextColor': '#01579b', 'primaryBorderColor': '#0288d1', 'lineColor': '#0288d1'}}}%%
 
 graph TB
-    subgraph OFFICE["RRG OFFICE (192.168.1.x)"]
-        INTERNET["INTERNET"]
+    subgraph NETWORK["TAILSCALE MESH (BeastofOne@tailc01f9b.ts.net)"]
+        direction TB
 
-        ROUTER["Office Router<br/>WiFi: SpectrumSetup-E0"]
-
-        subgraph SERVER["RRG-SERVER (Always On)"]
-            SERVER_INFO["Dell Inspiron 3880<br/>i5-10400 @ 2.9GHz (12 threads) | 12GB RAM<br/>98GB disk | Ubuntu 24.04.3 LTS"]
-            SERVER_LOCAL["Local: 192.168.1.31"]
-            SERVER_TS["Tailscale: 100.97.86.99"]
+        subgraph OFFICE["RRG OFFICE"]
+            RRG["<b>rrg-server</b><br/>Dell Inspiron 3880<br/>Ubuntu 24.04.3 LTS<br/>100.97.86.99"]
         end
 
-        INTERNET <--> ROUTER
-        ROUTER <--> SERVER
-    end
-
-    subgraph TAILSCALE["TAILSCALE MESH OVERLAY (BeastofOne@)"]
-
-        subgraph TS_MAC["JAKE'S MAC"]
-            MAC_INFO["MacBook Air 2020 Intel<br/>i5 @ 1.1GHz | 16GB RAM<br/>macOS Sequoia"]
-            MAC_TS["100.108.74.112"]
-        end
-
-        subgraph TS_RRG["RRG-SERVER"]
-            TS_RRG_IP["100.97.86.99"]
-        end
-
-        subgraph TS_LARRY["LARRY'S MACBOOK"]
-            LARRY_INFO["MacBook Pro<br/>SMS Gateway host"]
-            LARRY_TS["100.79.238.103"]
+        subgraph MOBILE["MOBILE"]
+            MAC["<b>jake-macbook</b><br/>MacBook Air 2020<br/>macOS Sequoia<br/>100.108.74.112"]
+            LARRY["<b>larrys-macbook</b><br/>MacBook Pro<br/>100.79.238.103"]
         end
     end
 
-    MAC_TS <-.->|"WireGuard<br/>SSH, HTTP"| TS_RRG_IP
-    TS_RRG_IP <-.->|"WireGuard"| LARRY_TS
+    subgraph PUBLIC["PUBLIC INTERNET"]
+        FUNNEL_DS["https://rrg-server.tailc01f9b.ts.net<br/>→ DocuSeal"]
+        FUNNEL_WM["https://rrg-server.tailc01f9b.ts.net:8443<br/>→ Windmill"]
+    end
+
+    %% Active Tailscale connections
+    MAC <-->|"SSH, HTTP"| RRG
+    MAC <-->|"SSH"| LARRY
+    RRG <-->|"HTTP :8080"| LARRY
+
+    %% Tailscale Funnel
+    FUNNEL_DS -->|":443 → :3000"| RRG
+    FUNNEL_WM -->|":8443 → :8000"| RRG
+
+    %% Styling
+    style PUBLIC fill:#fff8e1,stroke:#ffb300
 ```
 
 ### Key Points
@@ -62,92 +57,84 @@ graph TB
 All services running on each device and their connections.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#43a047'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#43a047', 'lineColor': '#43a047'}}}%%
 
 graph TB
-    subgraph MAC["JAKE'S MAC (100.108.74.112)"]
-        subgraph MAC_SERVICES["Services"]
-            CLAUDE_CLI["Claude Code CLI<br/>(Interactive terminal)"]
-            CLAUDE_ENDPOINT["Claude Endpoint<br/>:8787 (pm2)"]
+    subgraph RRG["RRG-SERVER (100.97.86.99)"]
+        direction TB
+
+        subgraph FUNNEL["Tailscale Funnel — Public HTTPS"]
+            F_DS["rrg-server.tailc01f9b.ts.net<br/>→ DocuSeal :3000"]
+            F_WM["rrg-server.tailc01f9b.ts.net:8443<br/>→ Windmill :8000"]
         end
 
-        subgraph MAC_SOURCE["Source Code (apps/)"]
-            SRC_ROUTER["jake-assistant/<br/>(jake-router source)"]
-            SRC_PNL["jake-pnl/<br/>(P&L source)"]
-            SRC_BROCHURE["jake-brochure/<br/>(Brochure source)"]
+        subgraph JAKE_APPS["jake-deploy (docker-compose.jake.yml)"]
+            ROUTER["<b>jake-router</b><br/>:8501 — Streamlit chat UI"]
+            PNL["<b>jake-pnl</b><br/>:8100 — P&L worker"]
+            BROCHURE["<b>jake-brochure</b><br/>:8101 — Brochure worker"]
         end
 
-        subgraph MCP_SERVERS["MCP Servers"]
-            MCP_HUBSPOT["HubSpot MCP"]
-            MCP_WINDMILL["Windmill MCP"]
+        subgraph WM_STACK["windmill (docker-compose.yml)"]
+            WM_SERVER["<b>windmill-server</b><br/>:8000 — Workflow engine"]
+            WM_WORKER["<b>windmill-worker</b><br/>Job executor"]
+            WM_DB["<b>postgres</b><br/>:5432 — Windmill DB"]
+        end
+
+        subgraph DS_STACK["docuseal (docker-compose.yml)"]
+            DOCUSEAL["<b>docuseal</b><br/>:3000 — NDA signing"]
         end
     end
 
-    subgraph RRG["RRG-SERVER (100.97.86.99)"]
-        subgraph DOCKER["Docker Containers"]
-
-            subgraph JAKE_APPS["Jake Apps (jake-deploy/)"]
-                ROUTER["jake-router<br/>:8501 (public)<br/>Streamlit chat UI"]
-                PNL["jake-pnl<br/>:8100 (internal)<br/>P&L worker"]
-                BROCHURE["jake-brochure<br/>:8101 (internal)<br/>Brochure worker"]
-            end
-
-            subgraph DOCUSEAL_STACK["DocuSeal (docuseal/)"]
-                DOCUSEAL["docuseal<br/>:3000 (public + Funnel)<br/>Custom-built from source"]
-            end
-
-            subgraph WINDMILL_STACK["Windmill (windmill/)"]
-                WM_SERVER["windmill-server<br/>:8000 (public + Funnel)"]
-                WM_WORKER["windmill-worker<br/>(internal)"]
-                WM_DB["postgres:16-alpine<br/>:5432 (internal)"]
-            end
-        end
-
-        subgraph FUNNEL["Tailscale Funnel (Public HTTPS)"]
-            FUNNEL_DS["rrg-server.tailc01f9b.ts.net<br/>→ :3000 (DocuSeal)"]
-            FUNNEL_WM["rrg-server.tailc01f9b.ts.net:8443<br/>→ :8000 (Windmill)"]
-        end
+    subgraph MAC["JAKE'S MAC (100.108.74.112)"]
+        CLAUDE_CLI["<b>Claude Code</b><br/>Interactive terminal"]
+        CLAUDE_EP["<b>claude-endpoint</b><br/>:8787 (pm2)"]
+        MCP_HS["HubSpot MCP"]
+        MCP_WM["Windmill MCP"]
     end
 
     subgraph LARRY["LARRY'S MAC (100.79.238.103)"]
-        SMS_GW["SMS Gateway<br/>:8080"]
+        SMS_GW["<b>SMS Gateway</b><br/>:8080"]
     end
 
     subgraph CLOUD["CLOUD SERVICES"]
-        HUBSPOT_API["HubSpot API"]
-        GMAIL_SMTP["Gmail SMTP<br/>(teamgotcher@gmail.com)"]
-        CLAUDE_API["Anthropic API"]
+        HUBSPOT["HubSpot API"]
+        GMAIL["Gmail SMTP"]
+        ANTHROPIC["Anthropic API"]
     end
 
-    %% Build pipeline
-    SRC_ROUTER -.->|"nix build → tarball → SCP"| ROUTER
-    SRC_PNL -.->|"nix build → tarball → SCP"| PNL
-    SRC_BROCHURE -.->|"nix build → tarball → SCP"| BROCHURE
+    %% Funnel routing
+    F_DS --> DOCUSEAL
+    F_WM --> WM_SERVER
 
-    %% Claude CLI connections
-    CLAUDE_CLI <--> MCP_HUBSPOT
-    CLAUDE_CLI <--> MCP_WINDMILL
+    %% Jake apps internal routing
+    ROUTER --> PNL
+    ROUTER --> BROCHURE
+    ROUTER --> WM_SERVER
 
-    %% MCP to services
-    MCP_HUBSPOT <-->|"REST API"| HUBSPOT_API
-    MCP_WINDMILL <-->|"HTTP :8000"| WM_SERVER
+    %% All jake apps → Anthropic
+    ROUTER --> ANTHROPIC
+    PNL --> ANTHROPIC
+    BROCHURE --> ANTHROPIC
 
-    %% Inter-container (windmill_default network)
-    ROUTER -->|"HTTP :8100"| PNL
-    ROUTER -->|"HTTP :8101"| BROCHURE
-    ROUTER -->|"HTTP :8000"| WM_SERVER
-
-    %% All jake apps use Claude API
-    ROUTER -->|"OAuth token"| CLAUDE_API
-    PNL -->|"OAuth token"| CLAUDE_API
-    BROCHURE -->|"OAuth token"| CLAUDE_API
-
-    %% DocuSeal
-    DOCUSEAL -->|"SMTP"| GMAIL_SMTP
-
-    %% Windmill
+    %% Windmill internals
     WM_SERVER --> WM_DB
     WM_WORKER --> WM_DB
+
+    %% DocuSeal → Gmail
+    DOCUSEAL --> GMAIL
+
+    %% Claude CLI MCP connections
+    CLAUDE_CLI --> MCP_HS
+    CLAUDE_CLI --> MCP_WM
+    MCP_HS --> HUBSPOT
+    MCP_WM -->|"via Tailscale"| WM_SERVER
+
+    %% Styling
+    style FUNNEL fill:#fff8e1,stroke:#ffb300
+    style CLOUD fill:#f3e5f5,stroke:#ab47bc
+    style JAKE_APPS fill:#e3f2fd,stroke:#42a5f5
+    style WM_STACK fill:#e8f5e9,stroke:#66bb6a
+    style DS_STACK fill:#fce4ec,stroke:#ef5350
 ```
 
 ### Key Points
@@ -165,67 +152,78 @@ graph TB
 The business logic — how services interact to accomplish tasks.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#fff3e0', 'primaryTextColor': '#e65100', 'primaryBorderColor': '#fb8c00'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#fff3e0', 'primaryTextColor': '#e65100', 'primaryBorderColor': '#fb8c00', 'lineColor': '#fb8c00'}}}%%
 
 graph TB
     subgraph TRIGGERS["TRIGGERS"]
-        T1["Jake opens chat UI<br/>(rrg-server:8501)"]
-        T2["Jake sends NDA<br/>(via Claude Code)"]
-        T3["Recipient signs NDA<br/>(DocuSeal)"]
-        T4["Windmill scheduled job<br/>or manual trigger"]
+        T_CHAT["User opens chat UI<br/>(:8501)"]
+        T_NDA["Jake sends NDA<br/>(via Claude Code)"]
+        T_SIGN["Recipient signs NDA<br/>(DocuSeal webhook)"]
+        T_SCHED["Windmill scheduled job"]
+        T_GMAIL["Gmail push notification<br/>(Pub/Sub)"]
     end
 
-    subgraph CHAT_FLOW["CHAT FLOW (jake-router)"]
-        ROUTER_IN["jake-router receives message"]
-        ROUTE_DECIDE{"Route by target_node"}
-        PNL_WORKER["jake-pnl<br/>P&L analysis"]
-        BROCHURE_WORKER["jake-brochure<br/>Brochure generation"]
-        WM_FLOW["Windmill flow<br/>(message_router)"]
+    subgraph CHAT_FLOW["CHAT FLOW"]
+        ROUTER["jake-router<br/>receives message"]
+        ROUTE{{"Route by<br/>target_node"}}
+        PNL["jake-pnl<br/>P&L analysis"]
+        BROCHURE["jake-brochure<br/>Brochure generation"]
+        WM_MSG["Windmill<br/>message_router"]
     end
 
     subgraph NDA_FLOW["NDA FLOW"]
-        NDA_SEND["DocuSeal creates submission<br/>from Template ID 1 (NCND-RRG)"]
-        NDA_EMAIL["Signing link emailed<br/>via teamgotcher@gmail.com"]
-        NDA_SIGN["Recipient signs"]
-        NDA_COMPLETE["DocuSeal fires webhook"]
+        DS_CREATE["DocuSeal creates submission<br/>Template: NCND-RRG"]
+        DS_EMAIL["Signing link emailed<br/>(teamgotcher SMTP)"]
+        DS_SIGN["Recipient signs"]
+        DS_HOOK["DocuSeal webhook fires"]
+        DS_HANDLER["Windmill<br/>docuseal_nda/completed"]
     end
 
-    subgraph WINDMILL_FLOWS["WINDMILL SWITCHBOARD"]
-        WM_LEAD["f/switchboard/lead_intake"]
-        WM_SIGNAL_W["s/switchboard/write_signal"]
-        WM_SIGNAL_R["s/switchboard/read_signals"]
-        WM_SIGNAL_A["s/switchboard/act_signal"]
-        WM_GMAIL["s/switchboard/gmail_pubsub_webhook"]
+    subgraph SWITCHBOARD["WINDMILL SWITCHBOARD"]
+        LEAD["lead_intake<br/>Process incoming leads"]
+        SIG_W["write_signal"]
+        SIG_R["read_signals"]
+        SIG_A["act_signal"]
+        GMAIL_WH["gmail_pubsub_webhook"]
+        GMAIL_WATCH["setup_gmail_watch<br/>(renew every 6 days)"]
     end
 
-    subgraph ENDPOINTS["EXTERNAL"]
+    subgraph EXTERNAL["EXTERNAL SERVICES"]
         HUBSPOT["HubSpot CRM"]
         CLAUDE["Anthropic API"]
+        GMAIL_API["Gmail API"]
     end
 
     %% Chat flow
-    T1 --> ROUTER_IN
-    ROUTER_IN --> ROUTE_DECIDE
-    ROUTE_DECIDE -->|"pnl"| PNL_WORKER
-    ROUTE_DECIDE -->|"brochure"| BROCHURE_WORKER
-    ROUTE_DECIDE -->|"windmill"| WM_FLOW
-    PNL_WORKER --> CLAUDE
-    BROCHURE_WORKER --> CLAUDE
+    T_CHAT --> ROUTER --> ROUTE
+    ROUTE -->|"pnl"| PNL
+    ROUTE -->|"brochure"| BROCHURE
+    ROUTE -->|"windmill"| WM_MSG
+    PNL --> CLAUDE
+    BROCHURE --> CLAUDE
 
     %% NDA flow
-    T2 --> NDA_SEND
-    NDA_SEND --> NDA_EMAIL
-    NDA_EMAIL --> NDA_SIGN
-    NDA_SIGN --> NDA_COMPLETE
-    NDA_COMPLETE --> HUBSPOT
+    T_NDA --> DS_CREATE --> DS_EMAIL --> DS_SIGN
+    T_SIGN --> DS_HOOK
+    DS_SIGN --> DS_HOOK
+    DS_HOOK --> DS_HANDLER --> HUBSPOT
 
-    %% Windmill
-    T4 --> WM_LEAD
-    WM_LEAD --> HUBSPOT
-    WM_SIGNAL_W --> WM_SIGNAL_R
-    WM_SIGNAL_R --> WM_SIGNAL_A
+    %% Windmill flows
+    T_SCHED --> LEAD --> HUBSPOT
+    T_GMAIL --> GMAIL_WH --> SIG_W
 
-    T3 --> NDA_COMPLETE
+    %% Signal pipeline
+    SIG_W --> SIG_R --> SIG_A
+
+    %% Gmail watch
+    GMAIL_WATCH --> GMAIL_API
+
+    %% Styling
+    style TRIGGERS fill:#e3f2fd,stroke:#42a5f5
+    style EXTERNAL fill:#f3e5f5,stroke:#ab47bc
+    style SWITCHBOARD fill:#e8f5e9,stroke:#66bb6a
+    style NDA_FLOW fill:#fce4ec,stroke:#ef5350
+    style CHAT_FLOW fill:#fff3e0,stroke:#ffb300
 ```
 
 ### Key Points
