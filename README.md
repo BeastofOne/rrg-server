@@ -8,9 +8,9 @@ Infrastructure documentation and configuration for the Resource Realty Group ser
 
 ## What Runs Here
 
-- **jake-router** — Streamlit chat UI that routes to specialized workers
-- **jake-pnl** — P&L analysis worker
-- **jake-brochure** — CRE brochure generator worker
+- **rrg-router** — Streamlit chat UI that routes to specialized workers
+- **rrg-pnl** — P&L analysis worker
+- **rrg-brochure** — CRE brochure generator worker
 - **DocuSeal** — Self-hosted NDA signing (custom fork)
 - **Windmill** — Workflow automation (switchboard, lead intake, signals)
 
@@ -22,6 +22,5 @@ Infrastructure documentation and configuration for the Resource Realty Group ser
 ## Related Repositories
 
 - [jake-assistant-system](https://github.com/BeastofOne/jake-assistant-system) — Executive function support system (artifacts, skills, CRM integration)
-- [jake-assistant](https://github.com/BeastofOne/jake-assistant) — jake-router source code (Streamlit + LangGraph)
 - [soggy-potatoes](https://github.com/BeastofOne/soggy-potatoes) — Sticker shop (separate project)
 

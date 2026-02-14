@@ -56,9 +56,9 @@ Network: `windmill_default` (external)
 
 | Container | Image | Size | Port | Purpose |
 |-----------|-------|------|------|---------|
-| jake-router | jake-router:latest | 2.15GB | 0.0.0.0:8501 | Streamlit chat UI, routes to workers |
-| jake-pnl | jake-pnl:latest | 1.55GB | 8100 (internal) | P&L analysis worker |
-| jake-brochure | jake-brochure:latest | 4.91GB | 8101 (internal) | CRE brochure generator |
+| rrg-router | rrg-router:latest | 2.15GB | 0.0.0.0:8501 | Streamlit chat UI, routes to workers |
+| rrg-pnl | rrg-pnl:latest | 1.55GB | 8100 (internal) | P&L analysis worker |
+| rrg-brochure | rrg-brochure:latest | 4.91GB | 8101 (internal) | CRE brochure generator |
 
 Environment variables (from .env):
 - `CLAUDE_CODE_OAUTH_TOKEN` — Anthropic API access
@@ -69,9 +69,9 @@ Environment variables (from .env):
 - `WINDMILL_WORKSPACE` — rrg
 
 Routing:
-- jake-router → jake-pnl via `http://jake-pnl:8100`
-- jake-router → jake-brochure via `http://jake-brochure:8101`
-- jake-router → windmill via `http://windmill-windmill_server-1:8000`
+- rrg-router → rrg-pnl via `http://rrg-pnl:8100`
+- rrg-router → rrg-brochure via `http://rrg-brochure:8101`
+- rrg-router → windmill via `http://windmill-windmill_server-1:8000`
 
 ### Windmill stack (3 containers)
 
@@ -142,7 +142,7 @@ Source code: `/home/andrea/docuseal-src/` (forked from docusealco/docuseal, Ruby
 | 22 | TCP | 0.0.0.0 | SSH |
 | 3000 | TCP | 0.0.0.0 | DocuSeal |
 | 8000 | TCP | 0.0.0.0 | Windmill |
-| 8501 | TCP | 0.0.0.0 | jake-router |
+| 8501 | TCP | 0.0.0.0 | rrg-router |
 | 443 | TCP | 100.97.86.99 | Tailscale Funnel (DocuSeal) |
 | 8443 | TCP | 100.97.86.99 | Tailscale Funnel (Windmill) |
 | 5432 | TCP | (container internal) | Postgres |
@@ -153,12 +153,12 @@ Source code: `/home/andrea/docuseal-src/` (forked from docusealco/docuseal, Ruby
 
 ```
 /home/andrea/
-├── jake-deploy/                    # Docker compose for jake apps
+├── jake-deploy/                    # Docker compose for RRG apps
 │   ├── docker-compose.jake.yml     # 3 containers: router, pnl, brochure
 │   └── .env                        # Claude token, Windmill config
 ├── jake-images/                    # Docker image tarballs (SCP'd from Mac)
-│   ├── jake-pnl.tar.gz            # 261MB
-│   └── jake-router.tar.gz         # 323MB
+│   ├── rrg-pnl.tar.gz            # 261MB
+│   └── rrg-router.tar.gz         # 323MB
 ├── windmill/                       # Docker compose for Windmill
 │   └── docker-compose.yml          # 3 containers: server, worker, postgres
 ├── docuseal/                       # Docker compose + customizations for DocuSeal
@@ -170,24 +170,23 @@ Source code: `/home/andrea/docuseal-src/` (forked from docusealco/docuseal, Ruby
 │   ├── Dockerfile                  # For building docuseal-rrg image
 │   ├── Gemfile                     # Ruby 4.0.1
 │   └── .git/                       # Origin: docusealco/docuseal.git
-└── docuseal-source/                # Empty directory (leftover, safe to delete)
 ```
 
 ---
 
 ## BUILD & DEPLOY PIPELINE
 
-### Jake Apps (router, pnl, brochure)
+### RRG Apps (router, pnl, brochure)
 
 ```
-Mac: ~/Desktop/apps/jake-assistant/     (jake-router source)
-Mac: ~/Desktop/apps/jake-pnl/           (jake-pnl source)
-Mac: ~/Desktop/apps/jake-brochure/      (jake-brochure source)
+Mac: ~/Desktop/rrg-server/rrg-router/    (rrg-router source)
+Mac: ~/Desktop/rrg-server/rrg-pnl/       (rrg-pnl source)
+Mac: ~/Desktop/rrg-server/rrg-brochure/  (rrg-brochure source)
 
 1. nix build .#docker           → result (Docker image tarball)
-2. scp result andrea@100.97.86.99:~/jake-images/jake-router.tar.gz
+2. scp result andrea@100.97.86.99:~/jake-images/rrg-router.tar.gz
 3. ssh andrea@100.97.86.99
-4. docker load < ~/jake-images/jake-router.tar.gz
+4. docker load < ~/jake-images/rrg-router.tar.gz
 5. cd ~/jake-deploy && docker compose -f docker-compose.jake.yml up -d
 ```
 
@@ -299,10 +298,10 @@ Docker image sizes:
 | Image | Size |
 |-------|------|
 | ghcr.io/windmill-labs/windmill:main | 5.18GB |
-| jake-brochure:latest | 4.91GB |
+| rrg-brochure:latest | 4.91GB |
 | docuseal-rrg:latest | 2.11GB |
-| jake-router:latest | 2.15GB |
-| jake-pnl:latest | 1.55GB |
+| rrg-router:latest | 2.15GB |
+| rrg-pnl:latest | 1.55GB |
 | node:20 | 1.59GB |
 | docuseal/docuseal:latest | 1.09GB |
 | postgres:16-alpine | 395MB |
@@ -327,8 +326,8 @@ Docker volumes (some may be orphaned):
 1. **Disk 94% full** — Needs cleanup of unused Docker images and orphaned volumes
 2. **No automated backups** — DocuSeal data and Windmill DB have no backup strategy
 3. **Default SSH password** — `andrea:***REDACTED***` should be changed
-4. **jake-brochure is 4.91GB** — Largest container, may include unnecessary dependencies
-5. **docuseal-source/ is empty** — Leftover directory, can be deleted
+4. ~~**rrg-brochure is 4.91GB**~~ — Accepted; Chromium + claude-code are required, works as-is
+5. ~~**docuseal-source/ is empty**~~ — Deleted (was empty leftover)
 6. **No monitoring** — No health checks or alerts if services go down
 
 ---

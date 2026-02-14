@@ -69,9 +69,9 @@ graph TB
         end
 
         subgraph JAKE_APPS["jake-deploy (docker-compose.jake.yml)"]
-            ROUTER["<b>jake-router</b><br/>:8501 — Streamlit chat UI"]
-            PNL["<b>jake-pnl</b><br/>:8100 — P&L worker"]
-            BROCHURE["<b>jake-brochure</b><br/>:8101 — Brochure worker"]
+            ROUTER["<b>rrg-router</b><br/>:8501 — Streamlit chat UI"]
+            PNL["<b>rrg-pnl</b><br/>:8100 — P&L worker"]
+            BROCHURE["<b>rrg-brochure</b><br/>:8101 — Brochure worker"]
         end
 
         subgraph WM_STACK["windmill (docker-compose.yml)"]
@@ -111,7 +111,7 @@ graph TB
     ROUTER --> BROCHURE
     ROUTER --> WM_SERVER
 
-    %% All jake apps → Anthropic
+    %% All RRG apps → Anthropic
     ROUTER --> ANTHROPIC
     PNL --> ANTHROPIC
     BROCHURE --> ANTHROPIC
@@ -138,8 +138,8 @@ graph TB
 ```
 
 ### Key Points
-- **All jake apps share the `windmill_default` Docker network** to communicate
-- **jake-router** is the entry point — routes chat messages to pnl/brochure workers
+- **All RRG apps share the `windmill_default` Docker network** to communicate
+- **rrg-router** is the entry point — routes chat messages to pnl/brochure workers
 - **Source code lives on Mac**, images are built with Nix flakes, shipped as tarballs via SCP
 - **DocuSeal source lives on the server** (`docuseal-src/`) — custom fork with RRG modifications
 - **Windmill workflows live in Windmill's Postgres DB** — managed via Windmill UI or MCP
@@ -164,10 +164,10 @@ graph TB
     end
 
     subgraph CHAT_FLOW["CHAT FLOW"]
-        ROUTER["jake-router<br/>receives message"]
+        ROUTER["rrg-router<br/>receives message"]
         ROUTE{{"Route by<br/>target_node"}}
-        PNL["jake-pnl<br/>P&L analysis"]
-        BROCHURE["jake-brochure<br/>Brochure generation"]
+        PNL["rrg-pnl<br/>P&L analysis"]
+        BROCHURE["rrg-brochure<br/>Brochure generation"]
         WM_MSG["Windmill<br/>message_router"]
     end
 
@@ -227,7 +227,7 @@ graph TB
 ```
 
 ### Key Points
-- **Chat flow** is the primary user-facing feature: Jake talks to jake-router, which delegates to specialized workers
+- **Chat flow** is the primary user-facing feature: Jake talks to rrg-router, which delegates to specialized workers
 - **NDA flow** is self-contained: DocuSeal handles the full signing lifecycle
 - **Windmill switchboard** handles background automation (lead intake, signal processing, Gmail webhooks)
 
@@ -314,15 +314,15 @@ graph TB
 | 3000 | DocuSeal | Tailscale + Funnel (public HTTPS) |
 | 5432 | Postgres (Windmill) | Internal only |
 | 8000 | Windmill Server | Tailscale + Funnel (:8443 public HTTPS) |
-| 8100 | jake-pnl | Internal (Docker network) |
-| 8101 | jake-brochure | Internal (Docker network) |
-| 8501 | jake-router | Tailscale |
+| 8100 | rrg-pnl | Internal (Docker network) |
+| 8101 | rrg-brochure | Internal (Docker network) |
+| 8501 | rrg-router | Tailscale |
 
 ### Docker Compose Files
 
 | File | Manages | Location on Server |
 |------|---------|-------------------|
-| `jake-deploy/docker-compose.jake.yml` | jake-router, jake-pnl, jake-brochure | `/home/andrea/jake-deploy/` |
+| `jake-deploy/docker-compose.jake.yml` | rrg-router, rrg-pnl, rrg-brochure | `/home/andrea/jake-deploy/` |
 | `windmill/docker-compose.yml` | windmill-server, windmill-worker, postgres | `/home/andrea/windmill/` |
 | `docuseal/docker-compose.yml` | docuseal (custom image) | `/home/andrea/docuseal/` |
 
@@ -330,9 +330,9 @@ graph TB
 
 | Component | Source | Build | Deploy |
 |-----------|--------|-------|--------|
-| jake-router | Mac: `apps/jake-assistant/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
-| jake-pnl | Mac: `apps/jake-pnl/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
-| jake-brochure | Mac: `apps/jake-brochure/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
+| rrg-router | `rrg-server/rrg-router/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
+| rrg-pnl | `rrg-server/rrg-pnl/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
+| rrg-brochure | `rrg-server/rrg-brochure/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
 | DocuSeal (custom) | Server: `docuseal-src/` | `docker build` on server | Local image `docuseal-rrg:latest` |
 | Windmill workflows | Windmill DB | Windmill UI/API | In-database |
 | Deploy configs | Server: `jake-deploy/`, `windmill/`, `docuseal/` | N/A | `docker compose up -d` |

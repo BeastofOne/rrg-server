@@ -2,10 +2,11 @@
 
 ## Overview
 
-Jake's CRE business infrastructure. Four projects, one monorepo:
+Jake's CRE business infrastructure. Five projects, one monorepo:
 
 ```
 rrg-server/
+├── rrg-router/            # Streamlit chat UI + intent router (port 8501)
 ├── rrg-pnl/              # P&L analysis (LangGraph + Flask, port 8100)
 ├── rrg-brochure/          # Property brochure generator (LangGraph + Flask, port 8101)
 ├── rrg-claude-endpoint/   # Claude API proxy (Node.js + pm2, port 8787)
@@ -43,6 +44,18 @@ rrg-server/
 ```
 
 ## Code Map
+
+### rrg-router/ — Streamlit Chat UI + Intent Router
+| File | What it does | Key exports |
+|------|-------------|-------------|
+| `app.py` | Streamlit UI — chat, signals tab, debug panel | — |
+| `graph.py` | LangGraph intent classifier (routes to pnl/brochure/chat) | `build_graph()` |
+| `config.py` | Worker URLs, Windmill settings, intent definitions | `WORKER_URLS`, `INTENTS` |
+| `node_client.py` | HTTP client for direct worker calls | `WorkerNodeClient` class |
+| `windmill_client.py` | HTTP client for Windmill message_router flow | `WindmillClient` class |
+| `signal_client.py` | HTTP client for signal queue (read/act/resume) | `SignalClient` class |
+| `claude_llm.py` | LangChain wrapper around `claude -p` CLI | `ChatClaudeCLI` class |
+| `state.py` | LangGraph state TypedDict | `RouterState` |
 
 ### rrg-pnl/ — P&L Analysis Worker
 | File | What it does | Key exports |
