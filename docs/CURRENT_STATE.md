@@ -132,9 +132,6 @@ Source code: `/home/andrea/docuseal-src/` (forked from docusealco/docuseal, Ruby
 | rrg-server (self) | 100.97.86.99 | online | — |
 | jacobs-macbook-air-2 | 100.108.74.112 | online, direct | — |
 | larrys-macbook-pro | 100.79.238.103 | online | — |
-| jake-server | 100.87.241.99 | **offline** | 9 days ago |
-| jake-server-1 | 100.64.223.78 | **offline** | 9 days ago |
-| samsung-sm-s901u | 100.118.198.116 | **offline** | 9 days ago |
 
 ---
 

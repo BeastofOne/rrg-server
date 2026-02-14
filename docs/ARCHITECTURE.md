@@ -3,7 +3,6 @@
 This document provides visual diagrams of the RRG-Server infrastructure across three layers.
 
 > **Verified:** February 14, 2026 via SSH inspection of running system.
-> **Relationship:** Loosely based on [jake-assistant-system](https://github.com/BeastofOne/jake-assistant-system/blob/main/docs/ARCHITECTURE.md) architecture.
 
 ---
 
@@ -47,21 +46,14 @@ graph TB
         end
     end
 
-    subgraph OFFLINE["OFFLINE DEVICES"]
-        JAKE_SERVER["jake-server<br/>100.87.241.99<br/>OFFLINE 9+ days"]
-        PHONE["Samsung Galaxy S22<br/>100.118.198.116<br/>OFFLINE 9+ days"]
-    end
-
     MAC_TS <-.->|"WireGuard<br/>SSH, HTTP"| TS_RRG_IP
     TS_RRG_IP <-.->|"WireGuard"| LARRY_TS
 ```
 
 ### Key Points
-- **RRG-Server** is at the RRG office (not Jake's home)
-- **jake-server** (Dell Latitude at home) is offline/paused — not part of this system
-- **Larry's MacBook** hosts the SMS Gateway (replaced the Samsung phone)
+- **RRG-Server** is at the RRG office, always on
+- **Larry's MacBook** hosts the SMS Gateway
 - All inter-device communication uses **Tailscale IPs** (100.x.x.x)
-- SSH access: `ssh andrea@100.97.86.99` (password: password)
 
 ---
 
@@ -240,8 +232,6 @@ graph TB
 - **Chat flow** is the primary user-facing feature: Jake talks to jake-router, which delegates to specialized workers
 - **NDA flow** is self-contained: DocuSeal handles the full signing lifecycle
 - **Windmill switchboard** handles background automation (lead intake, signal processing, Gmail webhooks)
-- **No n8n on RRG-Server** — that was jake-server only
-- **No Inbox Zero on RRG-Server** — that was jake-server only
 
 ---
 
@@ -254,8 +244,6 @@ graph TB
 | rrg-server | 100.97.86.99 | RRG Office | **Online** |
 | jake-macbook | 100.108.74.112 | Mobile | **Online** |
 | larrys-macbook | 100.79.238.103 | Mobile | **Online** |
-| jake-server | 100.87.241.99 | Jake's Home | Offline (paused) |
-| samsung-phone | 100.118.198.116 | — | Offline |
 
 ### Ports (RRG-Server)
 
@@ -307,22 +295,6 @@ As of Feb 14, 2026: **94% full (6.4GB free)**. Largest consumers:
 - Docker images/data: ~14GB in `/var/lib/docker/`
 - `docuseal-src/`: 693MB (full Ruby source + node_modules)
 - `jake-images/`: 584MB (deployment tarballs)
-
----
-
-## What's NOT on RRG-Server (vs. jake-server)
-
-These services ran on jake-server and are **not deployed** on RRG-Server:
-
-| Service | Was On jake-server | Status |
-|---------|-------------------|--------|
-| n8n | :5678, 8 workflows | Not on RRG-Server |
-| Inbox Zero | :3001 web, :5432 postgres, :redis | Not on RRG-Server |
-| Inbox API | :3002, SQLite event queue | Not on RRG-Server |
-| Pi-Hole | :53 DNS, :80 admin | Not on RRG-Server |
-| LLM Intercept | n8n workflow → Claude Endpoint | Not on RRG-Server |
-| SMS integration | n8n workflows for send/receive | Not on RRG-Server |
-| Email automation | n8n Send Email workflow | Not on RRG-Server |
 
 ---
 

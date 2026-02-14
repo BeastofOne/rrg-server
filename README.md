@@ -25,6 +25,3 @@ Infrastructure documentation and configuration for the Resource Realty Group ser
 - [jake-assistant](https://github.com/BeastofOne/jake-assistant) — jake-router source code (Streamlit + LangGraph)
 - [soggy-potatoes](https://github.com/BeastofOne/soggy-potatoes) — Sticker shop (separate project)
 
-## Relationship to jake-server
-
-RRG-Server is loosely based on the [jake-assistant-system architecture](https://github.com/BeastofOne/jake-assistant-system/blob/main/docs/ARCHITECTURE.md). jake-server (Dell Latitude at home, 100.87.241.99) is offline/paused. Services that ran on jake-server (n8n, Inbox Zero, Pi-Hole) are not yet deployed on RRG-Server.
