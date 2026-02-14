@@ -215,16 +215,72 @@ Workflows managed via Windmill UI or MCP API
 Workspace: `rrg`
 API: http://100.97.86.99:8000 (internal) or https://rrg-server.tailc01f9b.ts.net:8443 (public)
 
-Known scripts/flows (from Windmill MCP):
-- `f/switchboard/lead_intake` — Process incoming CRE leads
+Known flows:
+- `f/switchboard/lead_intake` — Process incoming CRE leads (6 modules, suspend/resume). See [`LEAD_INTAKE_PIPELINE.md`](LEAD_INTAKE_PIPELINE.md).
 - `f/switchboard/message_router` — Route chat messages to worker containers
-- `s/switchboard/write_signal` — Create a new signal
-- `s/switchboard/read_signals` — Read pending signals
-- `s/switchboard/act_signal` — Process a signal
-- `s/switchboard/get_pending_draft_signals` — Check for drafts
-- `s/switchboard/gmail_pubsub_webhook` — Gmail push notification handler
-- `s/switchboard/setup_gmail_watch` — Gmail Pub/Sub watch setup
+
+Known scripts (all `f/switchboard/` despite being scripts, not flows):
+- `f/switchboard/write_signal` — Create a new signal in jake_signals
+- `f/switchboard/read_signals` — Read pending signals
+- `f/switchboard/act_signal` — Mark signal as acted in Postgres (does not resume/cancel suspended flows)
+- `f/switchboard/get_pending_draft_signals` — Query pending lead_intake signals with draft_id_map
+- `f/switchboard/gmail_pubsub_webhook` — Gmail Pub/Sub push notification handler (real-time sent detection)
+- `f/switchboard/setup_gmail_watch` — Gmail SENT label watch setup (renew every 6 days)
 - `s/docuseal_nda/completed` — DocuSeal NDA completion webhook handler
+
+Windmill variables:
+- `f/switchboard/property_mapping` — JSON property alias → canonical name mapping
+- `f/switchboard/sms_gateway_url` — SMS gateway endpoint URL
+- `f/switchboard/gmail_last_history_id` — Gmail History API cursor (last processed history ID)
+- `f/switchboard/router_token` — Auth token for resume URL POSTs
+
+---
+
+## GMAIL PUB/SUB INTEGRATION
+
+**Purpose:** Real-time detection (~2 seconds) when a lead intake draft is sent from Gmail.
+
+### GCP Configuration
+
+| Setting | Value |
+|---------|-------|
+| GCP Project | `rrg-gmail-automation` |
+| Pub/Sub Topic | `projects/rrg-gmail-automation/topics/gmail-sent-notifications` |
+| Push Subscription Endpoint | `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/{TOKEN}/p/f/switchboard/gmail_pubsub_webhook` |
+| Gmail Account | `teamgotcher@gmail.com` |
+| Labels Watched | `SENT` |
+| Watch Expiry | ~7 days (renewed every 6 by `setup_gmail_watch`) |
+
+### How It Works
+
+1. `setup_gmail_watch` calls `users().watch()` on the SENT label, publishing to the GCP topic
+2. When any email is sent from `teamgotcher@gmail.com`, Gmail pushes `{emailAddress, historyId}` to the topic
+3. The push subscription delivers the notification (as a base64-encoded JSON inside a Pub/Sub envelope) to the Windmill webhook URL
+4. `gmail_pubsub_webhook` decodes the notification, queries Gmail History API for changes since the last stored history ID, checks each new SENT message for `X-Lead-Intake-*` headers
+5. If headers found: looks up the matching signal in `jake_signals` and POSTs to its `resume_url` to wake Module F
+
+---
+
+## GMAIL APPS SCRIPT (DRAFT DELETION FALLBACK)
+
+**Purpose:** Detect deleted drafts (lead rejections). Runs daily since deletion is low-priority.
+
+| Setting | Value |
+|---------|-------|
+| Apps Script Project ID | `1xLmwzHJh0heGgoBBdWQMZJtuuY3bXRsiOpoeteY9fYJ-MuYouu6VVfcD` |
+| Schedule | Daily at 9 AM (time-based trigger) |
+| Auth | `WINDMILL_TOKEN` in Script Properties |
+| Endpoint | Windmill API via Tailscale Funnel |
+
+### How It Works
+
+1. Calls `f/switchboard/get_pending_draft_signals` to get all pending signals with `draft_id_map`
+2. For each draft ID: tries `Gmail.Users.Drafts.get()` — if the draft still exists, skips it
+3. If draft not found: checks the thread for SENT messages
+4. If SENT message found: POSTs to `resume_url` (fallback for Pub/Sub miss)
+5. If no SENT message: POSTs to `cancel_url` (draft was deleted — flow cancelled, Module F never runs)
+
+Also exposes a web app for remote triggering (`?action=run`, `?action=setup`, `?action=status`).
 
 ---
 
