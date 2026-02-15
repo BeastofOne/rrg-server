@@ -15,5 +15,6 @@
 - SMS Gateway: 8080 (larry-sms-gateway)
 
 ## SSH Access
-- Key auth configured from jake-macbook → all machines
+- **Tailscale SSH enabled on rrg-server** — use `ssh andrea@rrg-server` (no keys/passwords needed)
+- Key auth configured from jake-macbook → other machines
 - Passwords in Windmill resource `f/switchboard/tailscale_machines`
