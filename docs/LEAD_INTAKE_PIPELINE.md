@@ -198,7 +198,11 @@ Writes a signal to the `jake_signals` Postgres table, then **suspends the Windmi
 ```
 This map is how external systems (Pub/Sub webhook, Apps Script) find the matching signal for a given draft.
 
-After writing the signal, the module returns and the flow **suspends**. See [Resume Mechanism](#resume-mechanism) for what happens next.
+After writing the signal, the module returns and the flow **suspends**. Two external systems watch for Jake's action on the draft:
+- **Sent:** Gmail Pub/Sub → `f/switchboard/gmail_pubsub_webhook` resumes the flow in ~2 seconds
+- **Deleted:** `gmail-draft-deletion-watcher` (Google Apps Script, daily 9 AM) POSTs to `cancel_url` to terminate the flow
+
+See [Resume Mechanism](#resume-mechanism) for full details.
 
 ---
 
@@ -224,9 +228,9 @@ Runs after the flow is resumed. Branches on `resume_payload.action`:
    - POST to SMS gateway (`f/switchboard/sms_gateway_url` → larry-sms-gateway :8080)
    - Record success/failure
 
-**`"draft_deleted"` path:** Returns `{ status: "rejected" }`. See [Known Issues](#known-issues).
+**`"draft_deleted"` path:** Returns `{ status: "rejected" }`. Note: this code path is currently unreachable — `gmail-draft-deletion-watcher` POSTs to the `cancel_url` (not `resume_url`), which terminates the flow before Module F runs. See [Known Issues](#known-issues).
 
-**`"error"` in payload:** Returns `{ status: "rejected" }`. This occurs when the `cancel_url` is POSTed to.
+**`"error"` in payload:** Returns `{ status: "rejected" }`. This occurs when `gmail-draft-deletion-watcher` POSTs to the `cancel_url` after detecting a deleted draft.
 
 ---
 
@@ -237,7 +241,7 @@ After Module E suspends, the flow is frozen. Three things can wake it up or kill
 | Trigger | Mechanism | Speed | What happens |
 |---------|-----------|-------|-------------|
 | Jake sends a draft | Gmail Pub/Sub → Windmill webhook → POST to `resume_url` | ~2 seconds | Module F runs |
-| Jake deletes a draft | Apps Script daily poll → POST to `cancel_url` | Up to 24 hours | Flow cancelled, Module F does NOT run |
+| Jake deletes a draft | `gmail-draft-deletion-watcher` (Apps Script daily poll) → POST to `cancel_url` | Up to 24 hours | Flow cancelled, Module F does NOT run |
 | Nothing happens | — | — | Flow stays suspended forever (`timeout: 0`) |
 
 ### How Windmill Suspend/Resume Works
