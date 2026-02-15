@@ -56,16 +56,12 @@ hubspot__create_contact(
 
 ---
 
-## Step 3: Send NDA (Inkless MCP)
+## Step 3: Send NDA (DocuSeal)
 
-```
-inkless__send_document(
-  recipient_name="[Full Name]",
-  recipient_email="[Email]",
-  document_type="NDA",
-  message="Please sign this Non-Disclosure Agreement to access our off-market commercial real estate opportunities."
-)
-```
+Send NDA via DocuSeal (self-hosted, Template ID 1 = NCND-RRG):
+1. Create submission in DocuSeal with lead's name and email
+2. DocuSeal emails the signing link directly to the lead
+3. Webhook `s/docuseal/nda_completed` fires when signed
 
 ---
 
@@ -86,7 +82,7 @@ Template customization:
 - `[First Name]` → actual name
 - `[Property Address]` → actual property
 - Source: "LoopNet" or "Crexi" (match actual source)
-- NDA source: "Inkless" (not DotLoop)
+- NDA source: "DocuSeal" (not DotLoop)
 
 ---
 
@@ -101,7 +97,7 @@ hubspot__update_contact(contact_id="[ID]", properties={"hs_lead_status": "Attemp
 ```
 hubspot__add_note(
   contact_id="[ID]",
-  note="[Source] lead - [action/property]\n\nActions taken:\n1. Created HubSpot contact\n2. Sent NDA via Inkless\n3. Sent follow-up email, CC'd Jasmin\n\nNext steps: Wait for NDA signature. Jake to make follow-up call."
+  note="[Source] lead - [action/property]\n\nActions taken:\n1. Created HubSpot contact\n2. Sent NDA via DocuSeal\n3. Sent follow-up email, CC'd Jasmin\n\nNext steps: Wait for NDA signature. Jake to make follow-up call."
 )
 ```
 

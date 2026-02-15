@@ -3,7 +3,7 @@
 ## What
 HTTP API proxy that accepts prompts and pipes them to `claude -p` CLI. Runs on jake-macbook via pm2 (port 8787), accessible over Tailscale at `http://100.108.74.112:8787`.
 
-External services (n8n, Windmill, Inbox Zero) call this to get LLM responses without their own Claude credentials — it uses Jake's Claude Max subscription via the CLI.
+External services (n8n, Windmill) call this to get LLM responses without their own Claude credentials — it uses Jake's Claude Max subscription via the CLI.
 
 ## Request/Response
 
@@ -61,7 +61,7 @@ Key details:
 ## Who Calls It
 - **n8n workflows** on rrg-server — email classification, lead parsing
 - **Windmill flows** — message routing, draft generation
-- **Inbox Zero** — email auto-categorization
+
 
 ## Manage
 ```bash
