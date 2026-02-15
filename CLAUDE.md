@@ -144,14 +144,32 @@ Both rrg-pnl and rrg-brochure use identical `ChatClaudeCLI` class:
 
 ## Deployment
 
-### rrg-pnl / rrg-brochure (Nix → Docker → rrg-server)
-```bash
-# Build Docker image locally
-nix build .#docker
+### Source Location
 
-# Copy to rrg-server and load
-scp result andrea@100.97.86.99:~/jake-images/<name>.tar.gz
-ssh andrea@100.97.86.99 'docker load < ~/jake-images/<name>.tar.gz && cd ~/jake-deploy && docker compose -f docker-compose.jake.yml up -d'
+Service source code lives on **rrg-server** (not jake-macbook):
+
+```
+/home/andrea/
+├── rrg-brochure/      # Source + Nix flake
+├── rrg-router/        # Source + Nix flake
+├── rrg-pnl/           # Source + Nix flake
+├── jake-deploy/       # docker-compose + .env (unchanged)
+└── windmill/          # docker-compose (unchanged)
+```
+
+Local `rrg-*/` directories on jake-macbook contain only `CLAUDE.md` (no source code).
+
+### rrg-pnl / rrg-brochure / rrg-router (Nix → Docker → rrg-server)
+```bash
+# SSH to rrg-server via Tailscale
+ssh andrea@rrg-server
+
+# Build and load Docker image
+cd ~/rrg-pnl  # or ~/rrg-brochure, ~/rrg-router
+nix build .#docker && docker load < result
+
+# Restart containers
+cd ~/jake-deploy && docker compose -f docker-compose.jake.yml up -d
 ```
 Env vars from `jake-deploy/.env`: `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_MODEL`
 
@@ -160,12 +178,6 @@ Env vars from `jake-deploy/.env`: `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_MODEL`
 pm2 start server.js --name claude-endpoint
 pm2 restart claude-endpoint
 pm2 logs claude-endpoint
-```
-
-### Local dev (any Python worker)
-```bash
-nix develop
-python graph.py  # or python server.py
 ```
 
 ## Infrastructure Docs
