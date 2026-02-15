@@ -301,6 +301,7 @@ Detects in real-time when Jake sends a lead intake draft from Gmail.
 Detects when Jake deletes a lead intake draft (rejection). Low priority, runs daily.
 
 **Location:** Google Apps Script project ID `1xLmwzHJh0heGgoBBdWQMZJtuuY3bXRsiOpoeteY9fYJ-MuYouu6VVfcD`
+**Local source:** `~/Desktop/other/services/gmail-draft-deletion-watcher/Code.js`
 
 **Schedule:** Daily at 9 AM (time-based trigger on `watchDrafts` function)
 
