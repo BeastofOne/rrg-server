@@ -18,11 +18,6 @@ Jake's email automation tool — inbox management, lead processing, and response
 - `hubspot__add_note` — Add note to contact
 - `hubspot__get_contact` — Get full details by ID
 
-### Inkless MCP (NDA Signatures)
-- `inkless__send_document` — Send NDA for signature (replaces DotLoop)
-- `inkless__check_status` — Check signature status
-- `inkless__list_documents` — List all sent documents
-
 ### httpSMS MCP
 - `mcp__httpsms__httpsms_send` — Send text via Jake's Android phone
 - `mcp__httpsms__httpsms_bulk_send` — Send to multiple recipients
@@ -51,13 +46,13 @@ Crexi spreadsheet-based bulk outreach. Invoke with `/outreach` or load `.claude/
 
 **Common phrases:**
 - "Absolutely!" (enthusiastic affirmative)
-- "I'll send over the NDA via Inkless here shortly"
+- "I'll send over the NDA via DocuSeal here shortly"
 - "If it doesn't show up in your inbox, check your spam folder"
 - "Please do not hesitate to reach out"
 - "Talk soon," (quick replies) / "All The Best," (formal)
 
 **Response patterns:**
-- NDA request → "I'll send the NDA via Inkless. Check spam if you don't see it."
+- NDA request → "I'll send the NDA via DocuSeal. Check spam if you don't see it."
 - Due diligence → Send NDA first, then full package after signing
 - Already has NDA → Attach off-market list directly
 
