@@ -166,7 +166,7 @@ ssh andrea@rrg-server
 
 # Build and load Docker image
 cd ~/rrg-pnl  # or ~/rrg-brochure, ~/rrg-router
-nix build .#docker && docker load < result
+nix build && docker load < result
 
 # Restart containers
 cd ~/jake-deploy && docker compose -f docker-compose.jake.yml up -d
