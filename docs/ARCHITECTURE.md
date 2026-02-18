@@ -47,7 +47,7 @@ graph TB
 
 ### Key Points
 - **RRG-Server** is at the RRG office, always on
-- **Larry's MacBook** hosts the SMS Gateway
+- **Pixel 9a** (at the office) handles SMS for Crexi/LoopNet leads
 - All inter-device communication uses **Tailscale IPs** (100.x.x.x)
 
 ---
@@ -92,8 +92,8 @@ graph TB
         MCP_WM["Windmill MCP"]
     end
 
-    subgraph LARRY["LARRY'S MAC (100.79.238.103)"]
-        SMS_GW["<b>SMS Gateway</b><br/>:8080"]
+    subgraph PIXEL["PIXEL 9A (100.125.176.16)"]
+        SMS_GW["<b>SMS Gateway</b><br/>:8686 (Termux + Flask)"]
     end
 
     subgraph CLOUD["CLOUD SERVICES"]
@@ -140,7 +140,7 @@ graph TB
 ### Key Points
 - **All RRG apps share the `windmill_default` Docker network** to communicate
 - **rrg-router** is the entry point — routes chat messages to pnl/brochure workers
-- **Source code lives on Mac**, images are built with Nix flakes, shipped as tarballs via SCP
+- **Source code lives on rrg-server** (`/home/andrea/rrg-*/`), images are built with Nix flakes on the server
 - **DocuSeal source lives on the server** (`docuseal-src/`) — custom fork with RRG modifications
 - **Windmill workflows live in Windmill's Postgres DB** — managed via Windmill UI or MCP
 - **Tailscale Funnel** exposes DocuSeal (:443) and Windmill (:8443) publicly
@@ -269,7 +269,7 @@ graph TB
 
     subgraph EXTERNAL["EXTERNAL"]
         WISEAGENT["WiseAgent CRM"]
-        SMS["SMS Gateway<br/>(larry-sms-gateway)"]
+        SMS["SMS Gateway<br/>(pixel-9a :8686)"]
     end
 
     A --> B --> C --> D
@@ -281,7 +281,7 @@ graph TB
     WEBHOOK -->|"POST resume_url"| F
 
     DELETE -.->|"Draft not found"| APPSSCRIPT
-    APPSSCRIPT -.->|"POST cancel_url"| CANCEL["Flow cancelled"]
+    APPSSCRIPT -.->|"POST resume_url<br/>action: draft_deleted"| F
 
     F --> WISEAGENT
     F --> SMS
@@ -304,6 +304,7 @@ graph TB
 |--------|-------------|----------|--------|
 | rrg-server | 100.97.86.99 | RRG Office | **Online** |
 | jake-macbook | 100.108.74.112 | Mobile | **Online** |
+| pixel-9a | 100.125.176.16 | RRG Office | **Online** |
 | larrys-macbook | 100.79.238.103 | Mobile | **Online** |
 
 ### Ports (RRG-Server)
@@ -330,10 +331,10 @@ graph TB
 
 | Component | Source | Build | Deploy |
 |-----------|--------|-------|--------|
-| rrg-router | `rrg-server/rrg-router/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
-| rrg-pnl | `rrg-server/rrg-pnl/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
-| rrg-brochure | `rrg-server/rrg-brochure/` | `nix build` → `.tar.gz` | SCP to server, `docker load` |
-| DocuSeal (custom) | Server: `docuseal-src/` | `docker build` on server | Local image `docuseal-rrg:latest` |
+| rrg-router | Server: `/home/andrea/rrg-router/` | `nix build` on server | `docker load < result` |
+| rrg-pnl | Server: `/home/andrea/rrg-pnl/` | `nix build` on server | `docker load < result` |
+| rrg-brochure | Server: `/home/andrea/rrg-brochure/` | `nix build` on server | `docker load < result` |
+| DocuSeal (custom) | Server: `/home/andrea/docuseal/` | `nix build` on server | `docker load < result` |
 | Windmill workflows | Windmill DB | Windmill UI/API | In-database |
 | Deploy configs | Server: `jake-deploy/`, `windmill/`, `docuseal/` | N/A | `docker compose up -d` |
 
@@ -359,5 +360,5 @@ As of Feb 14, 2026: **94% full (6.4GB free)**. Largest consumers:
 
 ---
 
-*Last verified: February 14, 2026*
-*Source: Direct SSH inspection of running system*
+*Last verified: February 18, 2026*
+*Source: Direct SSH inspection + dataflow analysis*

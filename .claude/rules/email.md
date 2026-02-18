@@ -6,7 +6,6 @@
 - Manual operations use gmail_search, gmail_send, gmail_reply, gmail_get_thread tools
 
 ## Mandatory Rules
-- **CC Jasmin on ALL emails:** Jasmin@resourcerealtygroupmi.com
 - **Reply to existing threads** when responding — new email only for initiating
 - **Verify email addresses via Gmail** before sending
 - **Never send "fix" emails** for mistakes — stop and ask Jake
