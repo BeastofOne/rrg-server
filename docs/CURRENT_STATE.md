@@ -223,10 +223,14 @@ Known scripts (all `f/switchboard/` despite being scripts, not flows):
 - `f/switchboard/read_signals` — Read pending signals
 - `f/switchboard/act_signal` — Mark signal as acted in Postgres (does not resume/cancel suspended flows)
 - `f/switchboard/get_pending_draft_signals` — Query pending lead_intake signals with draft_id_map
-- `f/switchboard/gmail_pubsub_webhook` — Gmail Pub/Sub push notification handler (real-time sent detection)
-- `f/switchboard/setup_gmail_watch` — Gmail SENT label watch setup (renew every 6 days)
+- `f/switchboard/gmail_pubsub_webhook` — Gmail change handler — SENT: thread_id match → resume; INBOX: categorize, label, trigger lead intake
+- `f/switchboard/gmail_polling_trigger` — Polls Gmail every 1 min, dispatches webhook async if changes detected (replaces Pub/Sub push)
+- `f/switchboard/setup_gmail_watch` — Gmail SENT + INBOX label watch setup (renew every 6 days)
 - `f/docuseal/nda_completed` — DocuSeal NDA completion webhook handler (uses `f/switchboard/wiseagent_oauth`)
 - `f/switchboard/check_gmail_watch_health` — Daily health check: alerts via SMS if webhook hasn't run in 48h
+
+Windmill schedules:
+- `f/switchboard/gmail_polling_schedule` — cron `0 */1 * * * *` (every 1 min) → `f/switchboard/gmail_polling_trigger`
 
 Windmill variables:
 - `f/switchboard/property_mapping` — JSON property alias → canonical name mapping
@@ -236,9 +240,9 @@ Windmill variables:
 
 ---
 
-## GMAIL PUB/SUB INTEGRATION
+## GMAIL INTEGRATION
 
-**Purpose:** Real-time detection (~2 seconds) when a lead intake draft is sent from Gmail.
+**Purpose:** Detect when lead intake drafts are sent (~1 minute) and categorize incoming emails.
 
 ### GCP Configuration
 
@@ -246,18 +250,21 @@ Windmill variables:
 |---------|-------|
 | GCP Project | `rrg-gmail-automation` |
 | Pub/Sub Topic | `projects/rrg-gmail-automation/topics/gmail-sent-notifications` |
-| Push Subscription Endpoint | `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/{TOKEN}/p/f/switchboard/gmail_pubsub_webhook` |
 | Gmail Account | `teamgotcher@gmail.com` |
-| Labels Watched | `SENT` |
+| Labels Watched | `SENT`, `INBOX` |
 | Watch Expiry | ~7 days (renewed every 6 by `setup_gmail_watch`) |
+| Delivery | Polling trigger every 1 minute (Pub/Sub push can't reach Tailscale) |
 
 ### How It Works
 
-1. `setup_gmail_watch` calls `users().watch()` on the SENT label, publishing to the GCP topic
-2. When any email is sent from `teamgotcher@gmail.com`, Gmail pushes `{emailAddress, historyId}` to the topic
-3. The push subscription delivers the notification (as a base64-encoded JSON inside a Pub/Sub envelope) to the Windmill webhook URL
-4. `gmail_pubsub_webhook` decodes the notification, queries Gmail History API for changes since the last stored history ID, checks each new SENT message for `X-Lead-Intake-*` headers
-5. If headers found: looks up the matching signal in `jake_signals` and POSTs to its `resume_url` to wake Module F
+1. `setup_gmail_watch` tells Gmail to track changes on SENT + INBOX labels
+2. `gmail_polling_trigger` runs every 1 minute — checks if Gmail's `historyId` has changed
+3. If changed: dispatches `gmail_pubsub_webhook` asynchronously (`wmill.run_script_async`)
+4. Webhook queries Gmail History API for changes since last cursor
+5. **SENT messages:** Fetches `threadId`, searches `jake_signals` for matching thread_id via JSONB query, POSTs to `resume_url` to wake Module F
+6. **INBOX messages:** Categorizes by sender/subject, applies Gmail labels, parses leads, triggers `lead_intake` flow
+
+**Key design choice:** Gmail strips all custom `X-` headers when drafts are sent. Sent emails are matched to signals by **thread_id** (stable across draft→sent transitions), not headers.
 
 ---
 
@@ -277,8 +284,8 @@ Windmill variables:
 1. Calls `f/switchboard/get_pending_draft_signals` to get all pending signals with `draft_id_map`
 2. For each draft ID: tries `Gmail.Users.Drafts.get()` — if the draft still exists, skips it
 3. If draft not found: checks the thread for SENT messages
-4. If SENT message found: POSTs to `resume_url` (fallback for Pub/Sub miss)
-5. If no SENT message: POSTs to `cancel_url` (draft was deleted — flow cancelled, Module F never runs)
+4. If SENT message found: POSTs to `resume_url` with `action: "email_sent"` (fallback for polling miss)
+5. If no SENT message: POSTs to `resume_url` with `action: "draft_deleted"` (Module F runs, writes CRM rejection note)
 
 Also exposes a web app for remote triggering (`?action=run`, `?action=setup`, `?action=status`).
 
