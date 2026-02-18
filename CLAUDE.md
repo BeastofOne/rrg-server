@@ -102,18 +102,18 @@ Both rrg-pnl and rrg-brochure use identical `ChatClaudeCLI` class:
 ## Windmill Pipeline (rrg-server)
 
 ### Lead Intake Flow (`f/switchboard/lead_intake`)
+Hopper architecture: webhook fires one flow per person (not one flow per batch).
 6-module pipeline:
-1. **WiseAgent Lookup** — Search contacts by email, check existing/NDA status
+1. **WiseAgent Lookup + Create** — Search contacts by email; create new contacts immediately (logged to `contact_creation_log`)
 2. **Property Match** — Match against `property_mapping` Windmill variable
 3. **Dedup/Group** — Combine same-person multi-property notifications
 4. **Generate Drafts + Gmail** — Create Gmail drafts with `X-Lead-Intake-*` headers
 5. **Approval Gate** — Suspend flow, write signal to `jake_signals` Postgres table
-6. **Post-Approval** — Update WiseAgent notes + send SMS via gateway
+6. **Post-Approval** — SMS first, then CRM note with accurate outcome; rejection notes on draft deletion
 
 ### WiseAgent CRM (lead intake only)
 - OAuth API: `sync.thewiseagent.com`
-- Credentials: Windmill resource `f/switchboard/wiseagent_oauth` (auto-refreshed)
-- Client ID/secret: Windmill resource `f/wiseagent/credentials`
+- Credentials: Windmill resource `f/switchboard/wiseagent_oauth` (auto-refreshed, shared with NDA handler)
 
 ### Signal System (Postgres `jake_signals` table)
 - `s/switchboard/write_signal` — Create signal
@@ -127,6 +127,7 @@ Both rrg-pnl and rrg-brochure use identical `ChatClaudeCLI` class:
   - **SENT path:** Detects lead intake drafts being sent, triggers Module F resume
   - **INBOX path:** Categorizes ALL incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
 - Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
+- Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h
 - GCP: topic `gmail-sent-notifications` in project `rrg-gmail-automation` (TeamGotcher)
 
 ### Message Router (`f/switchboard/message_router`)
@@ -140,8 +141,7 @@ Both rrg-pnl and rrg-brochure use identical `ChatClaudeCLI` class:
 ### Windmill Resources
 | Resource | Purpose |
 |----------|---------|
-| `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed) |
-| `f/wiseagent/credentials` | WiseAgent client ID/secret |
+| `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed, shared by lead intake + NDA handler) |
 | `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com |
 | `f/switchboard/pg` | Postgres connection (jake_signals table) |
 | `f/switchboard/tailscale_machines` | Network configs + SSH passwords |
@@ -232,12 +232,11 @@ pm2 logs claude-endpoint
 ### Communication
 1. Jake's provided contact info wins — never substitute CRM data
 2. Jake uses DocuSeal (self-hosted) for NDAs — Template ID 1 is NCND-RRG
-3. CC Jasmin on ALL emails: Jasmin@resourcerealtygroupmi.com
 
 ### Context Preservation
-4. Jake's exact words — copy verbatim, never summarize unless >10 lines
+3. Jake's exact words — copy verbatim, never summarize unless >10 lines
 
 ### Pipeline Safety
-5. Never approve signals without Jake's explicit approval
-6. Never modify Windmill flows/scripts without reviewing current state first
-7. Always verify WiseAgent OAuth token freshness before API calls
+4. Never approve signals without Jake's explicit approval
+5. Never modify Windmill flows/scripts without reviewing current state first
+6. Always verify WiseAgent OAuth token freshness before API calls

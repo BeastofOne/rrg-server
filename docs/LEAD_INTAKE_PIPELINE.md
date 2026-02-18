@@ -68,11 +68,15 @@ Gmail Pub/Sub notification → Windmill webhook
     After all messages processed:
     if leads_batch not empty →
          │
+    HOPPER ARCHITECTURE: Group leads by email address
+    Fire one flow per person (parallel)
+         │
+    For each person group:
     POST http://localhost:8000/api/w/rrg/jobs/run/f/f/switchboard/lead_intake
-         { "leads": leads_batch }
+         { "leads": [leads for this person] }
          │
          ▼
-    Pipeline starts (Module A → F)
+    Pipeline starts (Module A → F) — one flow per person
 ```
 
 **Categorization patterns** (from notification sender/subject, no LLM needed):
@@ -131,13 +135,13 @@ Input: { leads: [{name, email, phone, source, source_type, property_name, ...}] 
                                          Pub/Sub         Apps Script
                                          webhook         (daily 9 AM)
                                          (~2 sec)        POSTs to
-                                         POSTs to        cancel_url
-                                         resume_url           │
-                                              │               ▼
-                                              ▼          Flow cancelled
-                                         Module F        (no further
-                                         Post-Approval    action)
-                                         (CRM updates,
+                                         POSTs to        resume_url w/
+                                         resume_url      "draft_deleted"
+                                              │               │
+                                              ▼               ▼
+                                         Module F        Module F
+                                         Post-Approval   (writes CRM
+                                         (CRM updates,   rejection note)
                                           SMS send)
 ```
 
@@ -154,13 +158,17 @@ Input: { leads: [{name, email, phone, source, source_type, property_name, ...}] 
 | **Input** | `flow_input.leads` |
 | **Output** | Enriched leads array |
 
-Searches WiseAgent CRM by email for each lead. Determines whether the contact is new or existing, whether they have a signed NDA, and whether outreach has already been sent (by checking contact notes for "outreach sent" / "initial outreach").
+Searches WiseAgent CRM by email for each lead. If the contact doesn't exist, **creates it immediately** (moved from Module F). This ensures every lead exits Module A with a valid `wiseagent_client_id`, which is embedded in `X-Lead-Intake-WiseAgent-Client-ID` headers by Module D.
+
+Also determines whether the contact has a signed NDA and whether outreach has already been sent (by checking contact notes for "outreach sent" / "initial outreach").
+
+New contact creations are logged to the `contact_creation_log` Postgres table for audit/batch-fix purposes.
 
 **OAuth handling:** Reads `f/switchboard/wiseagent_oauth`, checks token expiry, refreshes via `https://sync.thewiseagent.com/WiseAuth/token` if expired, writes refreshed tokens back to the Windmill resource.
 
 **Fields added to each lead:**
-- `wiseagent_client_id` — CRM client ID (null if new)
-- `is_new` — true if no CRM match found
+- `wiseagent_client_id` — CRM client ID (always populated — created if new)
+- `is_new` — true if contact was just created
 - `has_nda` — true if contact has "NDA Signed" category
 - `is_followup` — true if outreach notes already exist
 - `wiseagent_status`, `wiseagent_rank` — CRM fields (existing contacts only)
@@ -275,7 +283,7 @@ This map is how external systems (Pub/Sub webhook, Apps Script) find the matchin
 
 After writing the signal, the module returns and the flow **suspends**. Two external systems watch for Jake's action on the draft:
 - **Sent:** Gmail Pub/Sub → `f/switchboard/gmail_pubsub_webhook` resumes the flow in ~2 seconds
-- **Deleted:** `gmail-draft-deletion-watcher` (Google Apps Script, daily 9 AM) POSTs to `cancel_url` to terminate the flow
+- **Deleted:** `gmail-draft-deletion-watcher` (Google Apps Script, daily 9 AM) POSTs to `resume_url` with `action: "draft_deleted"` so Module F can write CRM rejection notes
 
 See [Resume Mechanism](#resume-mechanism) for full details.
 
@@ -290,22 +298,22 @@ See [Resume Mechanism](#resume-mechanism) for full details.
 | **Inputs** | `resume` (POST body from resume URL) + `results.d` (Module D output, preserved across suspend) |
 | **Output** | `{ status, wiseagent_results[], sms_results[] }` |
 
-Runs after the flow is resumed. Branches on `resume_payload.action`:
+Runs after the flow is resumed. First marks the signal as `acted` in `jake_signals` (prevents duplicate processing). Then branches on `resume_payload.action`:
 
 **`"email_sent"` path:**
-1. Get WiseAgent OAuth token
-2. For each draft in `draft_data.drafts`:
-   - **New contact:** Create in WiseAgent (`webcontact` API, Status: "Hot Lead")
-   - **Existing contact:** Update status to "Contacted"
-   - **Add note:** "Email sent via Gmail draft on {date}. SMS sent. Property: {names}."
-3. For each draft with a phone number and SMS body:
-   - Clean phone to E.164 format
-   - POST to SMS gateway (`f/switchboard/sms_gateway_url` → pixel-9a :8686)
-   - Record success/failure
+1. Run SMS loop FIRST — send SMS to leads with phone numbers via pixel-9a gateway
+2. Get WiseAgent OAuth token
+3. For each draft in `draft_data.drafts`:
+   - Update contact status to "Contacted" (contact already exists — created by Module A)
+   - Add CRM note with **accurate** SMS outcome: "Email sent... SMS sent to {phone}." or "No phone number — SMS not sent." or "SMS attempted but failed."
 
-**`"draft_deleted"` path:** Returns `{ status: "rejected" }`. Note: this code path is currently unreachable — `gmail-draft-deletion-watcher` POSTs to the `cancel_url` (not `resume_url`), which terminates the flow before Module F runs. See [Known Issues](#known-issues).
+   Note: SMS runs before CRM notes because WiseAgent notes can't be edited after creation. Writing the note after SMS ensures accuracy.
 
-**`"error"` in payload:** Returns `{ status: "rejected" }`. This occurs when `gmail-draft-deletion-watcher` POSTs to the `cancel_url` after detecting a deleted draft.
+**`"draft_deleted"` path:**
+1. For each draft: add rejection note to the existing WiseAgent contact: "Lead rejected — draft deleted on {date}. Property: {names}."
+2. Return `{ status: "rejected" }`
+
+**`"error"` in payload:** Returns `{ status: "rejected" }`. This occurs when the flow is cancelled via Windmill's cancel URL.
 
 ---
 
@@ -315,9 +323,9 @@ After Module E suspends, the flow is frozen. Three things can wake it up or kill
 
 | Trigger | Mechanism | Speed | What happens |
 |---------|-----------|-------|-------------|
-| Jake sends a draft | Gmail Pub/Sub → Windmill webhook → POST to `resume_url` | ~2 seconds | Module F runs |
-| Jake deletes a draft | `gmail-draft-deletion-watcher` (Apps Script daily poll) → POST to `cancel_url` | Up to 24 hours | Flow cancelled, Module F does NOT run |
-| Nothing happens | — | — | Flow stays suspended forever (`timeout: 0`) |
+| Jake sends a draft | Gmail Pub/Sub → Windmill webhook → POST to `resume_url` | ~2 seconds | Module F runs (CRM update + SMS) |
+| Jake deletes a draft | `gmail-draft-deletion-watcher` (Apps Script daily poll) → POST to `resume_url` with `action: "draft_deleted"` | Up to 24 hours | Module F runs (CRM rejection note) |
+| Nothing happens | — | — | Flow stays suspended (`timeout: 0`) — visible reminder in Windmill |
 
 ### How Windmill Suspend/Resume Works
 
@@ -416,8 +424,8 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
                │     (fallback in case Pub/Sub missed it)
                │
                └── No SENT message → draft was deleted
-                     POST to cancel_url: { action: "draft_deleted" }
-                     (flow is cancelled, Module F never runs)
+                     POST to resume_url: { action: "draft_deleted" }
+                     (Module F runs, writes CRM rejection note)
 ```
 
 **Auth:** `WINDMILL_TOKEN` stored in Apps Script Properties. Communicates via public Tailscale Funnel URL (`https://rrg-server.tailc01f9b.ts.net:8443`).
@@ -449,8 +457,7 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 
 | Resource | Purpose |
 |----------|---------|
-| `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed by Module A and F) |
-| `f/wiseagent/credentials` | WiseAgent client ID/secret |
+| `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed by Module A, F, and NDA handler) |
 | `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com |
 | `f/switchboard/pg` | Postgres connection (jake_signals table) |
 
@@ -470,6 +477,7 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 | `get_pending_draft_signals` | Query pending lead_intake signals with draft_id_map (used by Apps Script) |
 | `gmail_pubsub_webhook` | Receives Gmail Pub/Sub notifications — SENT: triggers resume; INBOX: categorizes, labels, triggers lead intake |
 | `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch, renew every 6 days |
+| `check_gmail_watch_health` | Daily 10 AM ET — alerts via SMS if webhook hasn't run in 48h |
 | `act_signal` | Marks signal as acted in Postgres (does NOT resume/cancel suspended flows) |
 | `read_signals` | Query pending signals |
 | `write_signal` | Insert new signal row |
@@ -478,19 +486,18 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 
 ## Known Issues
 
-1. **Module F processes all drafts on any resume.** When the flow resumes (even from a single draft being sent), Module F loops through ALL drafts from Module D and performs CRM updates + SMS for every lead. If 3 leads produced 3 drafts and Jake sends 1, all 3 get processed.
+**Resolved (Feb 18, 2026):**
+1. ~~Module F processes all drafts on any resume~~ — **Fixed:** Hopper architecture (one flow per person) means each flow has exactly 1 draft.
+2. ~~Module F's `draft_deleted` branch unreachable~~ — **Fixed:** Apps Script now POSTs to `resume_url` (not `cancel_url`), so Module F runs and writes CRM rejection notes.
+3. ~~`act_signal` does not wake suspended flows~~ — **By design:** Router UI is read-only for lead intake. Gmail IS the UI (send = approve, delete = reject).
+4. ~~`sent_at` never populated~~ — **Fixed:** Both Pub/Sub webhook and Apps Script now include `sent_at` in resume payloads.
+5. ~~`timeout: 0` zombie flows~~ — **By design:** Suspended flows are visible reminders. With hopper architecture, each has exactly 1 draft.
+6. ~~Pub/Sub webhook `lead_data` ignored~~ — **Fixed:** Removed dead-weight `lead_data` from resume payload.
+7. ~~Lead parsing fails silently~~ — **Mitigated:** `validate_lead()` cross-checks fields. Failed/invalid parses downgrade to "Unlabeled" label. New contact creations logged to `contact_creation_log` table for retroactive batch-fix.
 
-2. **Module F's `draft_deleted` branch is unreachable.** The Apps Script posts to the `cancel_url` (which kills the flow entirely). Module F never runs on deletion, so its `if action == "draft_deleted"` code path can never execute.
-
-3. **`act_signal` does not wake suspended flows.** It only updates the `jake_signals` Postgres row to `status: 'acted'`. It does not POST to the resume or cancel URL. Manual rejection via `act_signal` leaves the Windmill flow suspended indefinitely.
-
-4. **`sent_at` is never populated in the resume payload.** Both the Pub/Sub webhook and the Apps Script send `action: "email_sent"` without a `sent_at` field. Module F reads `resume_payload.get("sent_at", "")` and gets an empty string.
-
-5. **`timeout: 0` means zombie flows.** If a lead is ignored (draft neither sent nor deleted), the Windmill flow stays suspended forever. There is no cleanup mechanism for stale suspended flows.
-
-6. **Pub/Sub webhook's `lead_data` is ignored by Module F.** The webhook extracts X-Lead-Intake headers and includes them as `lead_data` in the resume payload. Module F never reads `resume_payload["lead_data"]` — it only uses `draft_data` (Module D's preserved output).
-
-7. **Lead parsing is regex-based.** The INBOX categorization webhook parses lead names, emails, phones, and property names from notification body text using regex. If a notification format changes (e.g., Crexi redesigns their emails), the parser may fail silently — the email will still get labeled but no lead will be extracted. Monitor `lead_parsed: false` in webhook output.
+**Remaining:**
+- **Lead parsing is regex-based.** If a notification source changes their email format, the parser may fail. Downgrade-to-Unlabeled makes format changes visible (emails pile up in Unlabeled). Monitor `downgraded_to_unlabeled: true` in webhook output.
+- **No automated backups** for `jake_signals` or `contact_creation_log` tables.
 
 ---
 
@@ -513,4 +520,4 @@ The topic and push subscription should already exist from the original SENT-only
 
 ---
 
-*Last updated: February 18, 2026*
+*Last updated: February 18, 2026 — Hopper architecture, Module A creates contacts, Module F simplified*

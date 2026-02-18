@@ -131,6 +131,7 @@ Source code: `/home/andrea/docuseal-src/` (forked from docusealco/docuseal, Ruby
 |---------|-------------|--------|-----------|
 | rrg-server (self) | 100.97.86.99 | online | — |
 | jacobs-macbook-air-2 | 100.108.74.112 | online, direct | — |
+| pixel-9a | 100.125.176.16 | online | — |
 | larrys-macbook-pro | 100.79.238.103 | online | — |
 
 ---
@@ -179,15 +180,14 @@ Source code: `/home/andrea/docuseal-src/` (forked from docusealco/docuseal, Ruby
 ### RRG Apps (router, pnl, brochure)
 
 ```
-Mac: ~/Desktop/rrg-server/rrg-router/    (rrg-router source)
-Mac: ~/Desktop/rrg-server/rrg-pnl/       (rrg-pnl source)
-Mac: ~/Desktop/rrg-server/rrg-brochure/  (rrg-brochure source)
+Server: /home/andrea/rrg-router/    (rrg-router source + Nix flake)
+Server: /home/andrea/rrg-pnl/       (rrg-pnl source + Nix flake)
+Server: /home/andrea/rrg-brochure/  (rrg-brochure source + Nix flake)
 
-1. nix build .#docker           → result (Docker image tarball)
-2. scp result andrea@100.97.86.99:~/jake-images/rrg-router.tar.gz
-3. ssh andrea@100.97.86.99
-4. docker load < ~/jake-images/rrg-router.tar.gz
-5. cd ~/jake-deploy && docker compose -f docker-compose.jake.yml up -d
+1. ssh andrea@rrg-server
+2. cd ~/rrg-router   (or rrg-pnl, rrg-brochure)
+3. nix build && docker load < result
+4. cd ~/jake-deploy && docker compose -f docker-compose.jake.yml up -d
 ```
 
 ### DocuSeal (custom)
@@ -225,7 +225,8 @@ Known scripts (all `f/switchboard/` despite being scripts, not flows):
 - `f/switchboard/get_pending_draft_signals` — Query pending lead_intake signals with draft_id_map
 - `f/switchboard/gmail_pubsub_webhook` — Gmail Pub/Sub push notification handler (real-time sent detection)
 - `f/switchboard/setup_gmail_watch` — Gmail SENT label watch setup (renew every 6 days)
-- `s/docuseal_nda/completed` — DocuSeal NDA completion webhook handler
+- `f/docuseal/nda_completed` — DocuSeal NDA completion webhook handler (uses `f/switchboard/wiseagent_oauth`)
+- `f/switchboard/check_gmail_watch_health` — Daily health check: alerts via SMS if webhook hasn't run in 48h
 
 Windmill variables:
 - `f/switchboard/property_mapping` — JSON property alias → canonical name mapping
@@ -332,5 +333,5 @@ Docker volumes (some may be orphaned):
 
 ---
 
-*Last verified: February 14, 2026*
-*Source: Direct SSH inspection of running system*
+*Last verified: February 18, 2026*
+*Source: Direct SSH inspection + dataflow analysis*
