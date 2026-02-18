@@ -1,7 +1,7 @@
 # Lead Intake Pipeline
 
 > **Flow path:** `f/switchboard/lead_intake`
-> **Last verified:** February 14, 2026
+> **Last verified:** February 17, 2026
 
 The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realtor.com, and the Seller Hub. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
@@ -9,6 +9,7 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realt
 
 ## Table of Contents
 
+- [Trigger: Gmail Pub/Sub Webhook](#trigger-gmail-pubsub-webhook)
 - [Pipeline Overview](#pipeline-overview)
 - [Module Reference](#module-reference)
   - [Module A: WiseAgent Lookup](#module-a-wiseagent-lookup)
@@ -24,6 +25,80 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realt
 - [X-Lead-Intake Headers](#x-lead-intake-headers)
 - [Windmill Resources and Variables](#windmill-resources-and-variables)
 - [Known Issues](#known-issues)
+
+---
+
+## Trigger: Gmail Pub/Sub Webhook
+
+The pipeline is triggered automatically by `f/switchboard/gmail_pubsub_webhook`. This webhook handles **all** Gmail Pub/Sub notifications (both SENT and INBOX) in a single script with a single history cursor.
+
+```
+New email arrives in teamgotcher@gmail.com INBOX
+         │
+Gmail Pub/Sub notification → Windmill webhook
+         │
+    ┌────┴────┐
+    │ INBOX?  │──── no (SENT, DRAFT, etc.) ─── see Resume Mechanism
+    └────┬────┘
+         │ yes
+         ▼
+    Fetch sender + subject (metadata only)
+         │
+    Categorize by pattern matching:
+    ┌─────────────────────────────────────────────────────────┐
+    │ notifications.crexi.com          → label "Crexi"        │
+    │ loopnet.com + "favorited"        → label "LoopNet"      │
+    │ subject: "New realtor.com lead…" → label "Realtor.com"  │
+    │ subject: "New Verified Seller…"  → label "Seller Hub"   │
+    │ everything else                  → label "Unlabeled"    │
+    └─────────────────────────────────────────────────────────┘
+         │
+    Apply Gmail label to message
+         │
+    Is it a lead source? (Crexi/LoopNet/Realtor.com/Seller Hub)
+    ┌────┴────┐
+    │  yes    │──── no ─── done (labeled only)
+    └────┬────┘
+         │
+    Fetch full message body
+    Parse: name, email, phone, property_name, source_type
+         │
+    Add to leads_batch
+         │
+    After all messages processed:
+    if leads_batch not empty →
+         │
+    POST http://localhost:8000/api/w/rrg/jobs/run/f/f/switchboard/lead_intake
+         { "leads": leads_batch }
+         │
+         ▼
+    Pipeline starts (Module A → F)
+```
+
+**Categorization patterns** (from notification sender/subject, no LLM needed):
+
+| Source | Sender Match | Subject Match | Gmail Label | Lead Parse |
+|--------|-------------|---------------|-------------|------------|
+| Crexi | `notifications.crexi.com` | — | "Crexi" | Yes (source_type from body: om/flyer/info_request) |
+| LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes |
+| Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes |
+| Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes |
+| Everything else | — | — | "Unlabeled" | No |
+
+**Lead parser output** (per lead, passed to `lead_intake` flow):
+```json
+{
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "(555) 123-4567",
+    "source": "Crexi",
+    "source_type": "crexi_om",
+    "property_name": "Dairy Queen",
+    "notification_message_id": "msg_abc123"
+}
+```
+
+Per-property differentiation for Crexi happens downstream in Module B (`property_mapping` variable), not in the webhook.
 
 ---
 
@@ -225,7 +300,7 @@ Runs after the flow is resumed. Branches on `resume_payload.action`:
    - **Add note:** "Email sent via Gmail draft on {date}. SMS sent. Property: {names}."
 3. For each draft with a phone number and SMS body:
    - Clean phone to E.164 format
-   - POST to SMS gateway (`f/switchboard/sms_gateway_url` → larry-sms-gateway :8080)
+   - POST to SMS gateway (`f/switchboard/sms_gateway_url` → pixel-9a :8686)
    - Record success/failure
 
 **`"draft_deleted"` path:** Returns `{ status: "rejected" }`. Note: this code path is currently unreachable — `gmail-draft-deletion-watcher` POSTs to the `cancel_url` (not `resume_url`), which terminates the flow before Module F runs. See [Known Issues](#known-issues).
@@ -257,22 +332,22 @@ The signature baked into the URL provides authentication. Any system that knows 
 
 **Cancelling (POST to `cancel_url`):** The flow is immediately terminated. Module F never runs. The cancellation payload becomes the flow's final result.
 
-### Gmail Pub/Sub Chain (Sent Detection)
+### Gmail Pub/Sub Chain (Sent Detection + Inbox Categorization)
 
-Detects in real-time when Jake sends a lead intake draft from Gmail.
+A single webhook (`f/switchboard/gmail_pubsub_webhook`) handles both SENT detection (draft resume) and INBOX categorization (email labeling + lead intake trigger).
 
 **Prerequisites:**
 - `f/switchboard/setup_gmail_watch` has been run (and renews every 6 days)
-- GCP project `rrg-gmail-automation` has topic `gmail-sent-notifications`
+- GCP project `rrg-gmail-automation` (TeamGotcher) has topic `gmail-sent-notifications`
 - Topic has a push subscription pointing to the Windmill webhook URL
 - `gmail-api-push@system.gserviceaccount.com` has Pub/Sub Publisher permission on the topic
 
 **Chain of events:**
 
 ```
-1. Jake hits Send on a Gmail draft
+1. Gmail mailbox change (new email received OR email sent)
          │
-2. Gmail detects SENT label change on teamgotcher@gmail.com
+2. Gmail detects label change on teamgotcher@gmail.com (SENT or INBOX)
          │
 3. Gmail pushes to GCP Pub/Sub topic:
          │   { emailAddress: "teamgotcher@gmail.com", historyId: 1001 }
@@ -280,25 +355,36 @@ Detects in real-time when Jake sends a lead intake draft from Gmail.
          │
 4. Pub/Sub push subscription POSTs to Windmill webhook:
          │   https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/{TOKEN}/p/f/switchboard/gmail_pubsub_webhook
-         │   The TOKEN is a fixed Windmill webhook secret, not the message content.
          │
 5. gmail_pubsub_webhook runs:
          │
          ├── Decode base64 → get historyId (1001)
-         ├── Read stored cursor from Windmill variable f/switchboard/gmail_last_history_id (e.g. 1000)
-         ├── Query Gmail History API: "what changed between 1000 and 1001 on the SENT label?"
-         │     → Returns list of message IDs added to SENT
-         ├── For each message, fetch X-Lead-Intake-* headers
-         ├── If X-Lead-Intake-Draft-ID exists:
-         │     ├── Query jake_signals: WHERE detail->'draft_id_map' ? {draft_id}
-         │     ├── Get resume_url from the matching signal
-         │     └── POST to resume_url: { action: "email_sent", draft_id, lead_data }
+         ├── Read stored cursor from f/switchboard/gmail_last_history_id (e.g. 1000)
+         ├── Query Gmail History API: "what changed between 1000 and 1001?"
+         │     → Returns list of messageAdded events (no label filter)
+         │
+         ├── For each message with SENT label:
+         │     ├── Fetch X-Lead-Intake-* headers
+         │     ├── If X-Lead-Intake-Draft-ID exists:
+         │     │     ├── Query jake_signals for matching draft_id
+         │     │     └── POST to resume_url: { action: "email_sent", ... }
+         │     └── Otherwise: silently ignore (normal sent email)
+         │
+         ├── For each message with INBOX label:
+         │     ├── Fetch sender + subject (metadata only)
+         │     ├── Categorize → apply Gmail label
+         │     ├── If lead source: fetch full body, parse lead data
+         │     └── Add parsed lead to leads_batch
+         │
+         ├── If leads_batch not empty:
+         │     └── POST to lead_intake flow: { leads: leads_batch }
+         │
          └── Save new historyId (1001) to f/switchboard/gmail_last_history_id
 ```
 
-**Gmail History ID explained:** Every change in a Gmail mailbox increments a counter. The history ID is that counter value. When a Pub/Sub notification arrives with `historyId: 1001`, the webhook asks Gmail "what happened between my last checkpoint and 1001?" This range query is necessary because Gmail may batch multiple changes into a single notification (e.g., 3 emails sent quickly may produce only 1 notification with the latest history ID).
+**Single cursor, single subscription:** Both SENT and INBOX events come through the same Pub/Sub subscription and use the same `gmail_last_history_id` cursor. The webhook branches on the `labelIds` array that comes with each `messageAdded` event.
 
-**Filtering:** The webhook fires for every sent email from `teamgotcher@gmail.com`, not just lead intake emails. Non-lead-intake emails have no `X-Lead-Intake-*` headers and are silently ignored.
+**Gmail History ID explained:** Every change in a Gmail mailbox increments a counter. The history ID is that counter value. When a Pub/Sub notification arrives with `historyId: 1001`, the webhook asks Gmail "what happened between my last checkpoint and 1001?" This range query is necessary because Gmail may batch multiple changes into a single notification (e.g., 3 emails sent quickly may produce only 1 notification with the latest history ID).
 
 ### Apps Script Fallback (Deletion Detection)
 
@@ -373,7 +459,7 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 | Variable | Purpose |
 |----------|---------|
 | `f/switchboard/property_mapping` | JSON mapping of property aliases → canonical names with metadata |
-| `f/switchboard/sms_gateway_url` | SMS gateway endpoint URL (larry-sms-gateway) |
+| `f/switchboard/sms_gateway_url` | SMS gateway endpoint URL (pixel-9a, Crexi/LoopNet leads only) |
 | `f/switchboard/gmail_last_history_id` | Gmail History API cursor — last processed history ID |
 | `f/switchboard/router_token` | Auth token used by gmail_pubsub_webhook for resume URL POSTs |
 
@@ -382,8 +468,8 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 | Script | Purpose |
 |--------|---------|
 | `get_pending_draft_signals` | Query pending lead_intake signals with draft_id_map (used by Apps Script) |
-| `gmail_pubsub_webhook` | Receives Gmail Pub/Sub notifications, triggers resume |
-| `setup_gmail_watch` | Sets up Gmail SENT label watch, renew every 6 days |
+| `gmail_pubsub_webhook` | Receives Gmail Pub/Sub notifications — SENT: triggers resume; INBOX: categorizes, labels, triggers lead intake |
+| `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch, renew every 6 days |
 | `act_signal` | Marks signal as acted in Postgres (does NOT resume/cancel suspended flows) |
 | `read_signals` | Query pending signals |
 | `write_signal` | Insert new signal row |
@@ -404,6 +490,27 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 
 6. **Pub/Sub webhook's `lead_data` is ignored by Module F.** The webhook extracts X-Lead-Intake headers and includes them as `lead_data` in the resume payload. Module F never reads `resume_payload["lead_data"]` — it only uses `draft_data` (Module D's preserved output).
 
+7. **Lead parsing is regex-based.** The INBOX categorization webhook parses lead names, emails, phones, and property names from notification body text using regex. If a notification format changes (e.g., Crexi redesigns their emails), the parser may fail silently — the email will still get labeled but no lead will be extracted. Monitor `lead_parsed: false` in webhook output.
+
 ---
 
-*Last updated: February 14, 2026*
+## GCP Setup (One-Time)
+
+The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth client credentials.
+
+**Project:** `rrg-gmail-automation` (TeamGotcher Google account)
+**Topic:** `gmail-sent-notifications`
+
+The topic and push subscription should already exist from the original SENT-only setup. The only change needed is to update the `f/switchboard/gmail_oauth` Windmill resource so its `client_id` and `client_secret` come from the `rrg-gmail-automation` GCP project (not `claude-connector-484817`). Then run `f/switchboard/setup_gmail_watch` to activate the watch with INBOX added.
+
+**If setting up from scratch (GCP Console):**
+1. Go to Pub/Sub → Topics → Create Topic: `gmail-sent-notifications`
+2. On the topic, add IAM binding: `gmail-api-push@system.gserviceaccount.com` → role `Pub/Sub Publisher`
+3. Create a Push Subscription on the topic:
+   - Endpoint URL: `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/{TOKEN}/p/f/switchboard/gmail_pubsub_webhook`
+   - (The `{TOKEN}` is the Windmill webhook token, visible in the Windmill UI)
+4. Run `f/switchboard/setup_gmail_watch` to activate the watch
+
+---
+
+*Last updated: February 18, 2026*

@@ -17,10 +17,11 @@ rrg-server/
 
 ## System Architecture
 
-**Three machines on Tailscale** (details → `.claude/rules/network.md`):
+**Four machines on Tailscale** (details → `.claude/rules/network.md`):
 - **jake-macbook** — Claude Code, claude-endpoint (pm2)
 - **rrg-server** — Docker containers (pnl, brochure), Windmill, Postgres, DocuSeal
-- **larry-sms-gateway** — SMS/iMessage relay
+- **pixel-9a** — SMS gateway for Crexi/LoopNet leads (Termux + Flask, port 8686)
+- **larry-sms-gateway** — iMessage relay
 
 **Worker pattern:** rrg-pnl and rrg-brochure are identical Flask microservices behind a message router. Both expose `POST /process` with the same request/response contract:
 
@@ -122,8 +123,11 @@ Both rrg-pnl and rrg-brochure use identical `ChatClaudeCLI` class:
 
 ### Gmail Integration
 - OAuth: `f/switchboard/gmail_oauth` (teamgotcher@gmail.com)
-- Pub/Sub: `s/switchboard/gmail_pubsub_webhook`
-- Watch: `s/switchboard/setup_gmail_watch`
+- Pub/Sub: `f/switchboard/gmail_pubsub_webhook` — handles both SENT and INBOX
+  - **SENT path:** Detects lead intake drafts being sent, triggers Module F resume
+  - **INBOX path:** Categorizes ALL incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
+- Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
+- GCP: topic `gmail-sent-notifications` in project `rrg-gmail-automation` (TeamGotcher)
 
 ### Message Router (`f/switchboard/message_router`)
 - Routes to rrg-pnl (port 8100) or rrg-brochure (port 8101)
