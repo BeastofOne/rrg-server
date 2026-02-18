@@ -107,8 +107,8 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 1. **WiseAgent Lookup + Create** — Search contacts by email; create new contacts immediately (logged to `contact_creation_log`)
 2. **Property Match** — Match against `property_mapping` Windmill variable
 3. **Dedup/Group** — Combine same-person multi-property notifications
-4. **Generate Drafts + Gmail** — Create Gmail drafts with `X-Lead-Intake-*` headers
-5. **Approval Gate** — Suspend flow, write signal to `jake_signals` Postgres table
+4. **Generate Drafts + Gmail** — Create Gmail drafts, store thread_id for SENT matching (no custom headers — Gmail strips them)
+5. **Approval Gate** — Suspend flow, write signal to `jake_signals` (stops cleanly if no drafts via `stop_after_if`)
 6. **Post-Approval** — SMS first, then CRM note with accurate outcome; rejection notes on draft deletion
 
 ### WiseAgent CRM (lead intake only)
@@ -125,7 +125,7 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 - OAuth: `f/switchboard/gmail_oauth` (teamgotcher@gmail.com, GCP project `rrg-gmail-automation`)
 - Polling: `f/switchboard/gmail_polling_trigger` — runs every 1 minute, checks historyId for changes, dispatches webhook async
 - Webhook: `f/switchboard/gmail_pubsub_webhook` — handles both SENT and INBOX
-  - **SENT path:** Detects lead intake drafts being sent, triggers Module F resume
+  - **SENT path:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume
   - **INBOX path:** Categorizes ALL incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
 - Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
 - Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h

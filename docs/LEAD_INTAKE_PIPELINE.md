@@ -1,7 +1,7 @@
 # Lead Intake Pipeline
 
 > **Flow path:** `f/switchboard/lead_intake`
-> **Last verified:** February 17, 2026
+> **Last verified:** February 18, 2026
 
 The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realtor.com, and the Seller Hub. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
@@ -20,9 +20,9 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realt
   - [Module F: Post-Approval](#module-f-post-approval)
 - [Resume Mechanism](#resume-mechanism)
   - [How Windmill Suspend/Resume Works](#how-windmill-suspendresume-works)
-  - [Gmail Pub/Sub Chain (Sent Detection)](#gmail-pubsub-chain-sent-detection)
+  - [Thread ID Matching (Sent Detection)](#thread-id-matching-sent-detection)
+  - [Polling Trigger](#polling-trigger)
   - [Apps Script Fallback (Deletion Detection)](#apps-script-fallback-deletion-detection)
-- [X-Lead-Intake Headers](#x-lead-intake-headers)
 - [Windmill Resources and Variables](#windmill-resources-and-variables)
 - [Known Issues](#known-issues)
 
@@ -114,9 +114,9 @@ Input: { leads: [{name, email, phone, source, source_type, property_name, ...}] 
   Module A          Module B           Module C            Module D
   WiseAgent  ───▶  Property    ───▶  Dedup/Group  ───▶  Generate Drafts
   Lookup           Match                                 + Gmail API
-  (enrich w/       (canonical         (group by          (create drafts w/
-   CRM data)        names,             email,             X-Lead-Intake-*
-                    deal IDs)          separate            headers)
+  (enrich w/       (canonical         (group by          (create drafts,
+   CRM data)        names,             email,             store thread_id
+                    deal IDs)          separate            for SENT matching)
                                        info reqs)
                                                               │
                                                               ▼
@@ -223,7 +223,7 @@ Each grouped lead carries all properties as a `properties[]` array and collects 
 | **Input** | `results.c` |
 | **Output** | `{ preflight_checklist, drafts[], info_requests[], summary }` |
 
-The largest module. Selects an email template for each lead based on source type and context, then creates Gmail drafts via the Gmail API with tracking headers embedded.
+The largest module. Selects an email template for each lead based on source type and context, then creates Gmail drafts via the Gmail API.
 
 **Template selection logic:**
 
@@ -239,11 +239,9 @@ The largest module. Selects an email template for each lead based on source type
 
 **Follow-up detection:** Beyond WiseAgent notes (Module A), Module D also checks Gmail sent folder for recent emails to the same address (last 7 days). If found, overrides `is_followup` to true.
 
-**Gmail draft creation** is a two-step process per draft:
-1. Create draft with all `X-Lead-Intake-*` headers except Draft-ID (unknown until created)
-2. Update draft to add `X-Lead-Intake-Draft-ID` header (now known)
+**Gmail draft creation** is a single API call per draft — `drafts().create()`. No custom headers are added because **Gmail strips all custom X- headers when a draft is sent**. Instead, the `thread_id` returned by the create call is stored and used for SENT matching (thread IDs are stable across draft→sent transitions).
 
-Each draft object includes: email content, template used, SMS body (if phone available), Gmail draft/message/thread IDs, and creation status.
+Each draft object includes: email content, template used, SMS body (if phone available), Gmail draft/thread IDs, and creation status.
 
 **OAuth:** Uses `f/switchboard/gmail_oauth` for `teamgotcher@gmail.com`.
 
@@ -257,9 +255,12 @@ Each draft object includes: email content, template used, SMS body (if phone ava
 | **Language** | Python 3.12 |
 | **Input** | `results.d` |
 | **Output** | `{ signal_id, created_at, resume_url, cancel_url, draft_count }` |
-| **Suspend** | `required_events: 1, timeout: 0` |
+| **Suspend** | `required_events: 1, timeout: 31536000` (1 year) |
+| **stop_after_if** | `result.skipped == true` — terminates flow cleanly when no drafts exist |
 
-Writes a signal to the `jake_signals` Postgres table, then **suspends the Windmill flow** indefinitely until an external system POSTs to the resume or cancel URL.
+If there are no drafts (e.g., lead had no email, or all leads were info requests), Module E returns `{ skipped: true }` and the flow terminates immediately via `stop_after_if` — no signal is created and no zombie flow is left behind.
+
+Otherwise, writes a signal to the `jake_signals` Postgres table, then **suspends the Windmill flow** until an external system POSTs to the resume URL.
 
 **What gets written to `jake_signals`:**
 
@@ -282,7 +283,7 @@ Writes a signal to the `jake_signals` Postgres table, then **suspends the Windmi
 This map is how external systems (Pub/Sub webhook, Apps Script) find the matching signal for a given draft.
 
 After writing the signal, the module returns and the flow **suspends**. Two external systems watch for Jake's action on the draft:
-- **Sent:** Gmail Pub/Sub → `f/switchboard/gmail_pubsub_webhook` resumes the flow in ~2 seconds
+- **Sent:** Polling trigger → `f/switchboard/gmail_pubsub_webhook` → thread_id match → resumes the flow in ~1 minute
 - **Deleted:** `gmail-draft-deletion-watcher` (Google Apps Script, daily 9 AM) POSTs to `resume_url` with `action: "draft_deleted"` so Module F can write CRM rejection notes
 
 See [Resume Mechanism](#resume-mechanism) for full details.
@@ -319,13 +320,13 @@ Runs after the flow is resumed. First marks the signal as `acted` in `jake_signa
 
 ## Resume Mechanism
 
-After Module E suspends, the flow is frozen. Three things can wake it up or kill it:
+After Module E suspends, the flow is frozen. Three things can wake it up:
 
 | Trigger | Mechanism | Speed | What happens |
 |---------|-----------|-------|-------------|
-| Jake sends a draft | Gmail Pub/Sub → Windmill webhook → POST to `resume_url` | ~2 seconds | Module F runs (CRM update + SMS) |
+| Jake sends a draft | Polling trigger → webhook → thread_id match → POST to `resume_url` | ~1 minute | Module F runs (CRM update + SMS) |
 | Jake deletes a draft | `gmail-draft-deletion-watcher` (Apps Script daily poll) → POST to `resume_url` with `action: "draft_deleted"` | Up to 24 hours | Module F runs (CRM rejection note) |
-| Nothing happens | — | — | Flow stays suspended (`timeout: 0`) — visible reminder in Windmill |
+| Nothing happens | — | — | Flow stays suspended (1 year timeout) — visible reminder in Windmill |
 
 ### How Windmill Suspend/Resume Works
 
@@ -340,43 +341,50 @@ The signature baked into the URL provides authentication. Any system that knows 
 
 **Cancelling (POST to `cancel_url`):** The flow is immediately terminated. Module F never runs. The cancellation payload becomes the flow's final result.
 
-### Gmail Pub/Sub Chain (Sent Detection + Inbox Categorization)
+### Thread ID Matching (Sent Detection)
 
-A single webhook (`f/switchboard/gmail_pubsub_webhook`) handles both SENT detection (draft resume) and INBOX categorization (email labeling + lead intake trigger).
+When a draft is sent from Gmail, the webhook matches the sent email back to its lead intake signal using **thread_id**. Gmail preserves the thread_id across the draft→sent transition (unlike draft_id and message_id, which change).
 
-**Prerequisites:**
-- `f/switchboard/setup_gmail_watch` has been run (and renews every 6 days)
-- GCP project `rrg-gmail-automation` (TeamGotcher) has topic `gmail-sent-notifications`
-- Topic has a push subscription pointing to the Windmill webhook URL
-- `gmail-api-push@system.gserviceaccount.com` has Pub/Sub Publisher permission on the topic
+**Why not X-headers?** Gmail strips ALL custom `X-` headers when drafts are sent. Only 7 standard headers survive (`Content-Type`, `Date`, `From`, `MIME-Version`, `Message-ID`, `Subject`, `To`). Thread_id is the only stable identifier.
 
-**Chain of events:**
+**Matching logic** (`find_and_update_signal_by_thread`):
+1. Webhook receives a SENT message, fetches its `threadId` via Gmail API (`format='minimal'`)
+2. Queries `jake_signals` with a JSONB search: `WHERE detail->'draft_id_map' contains a draft with matching thread_id`
+3. If found: marks signal as `acted`, returns `resume_url` and matched `draft_id`
+4. POSTs to `resume_url` with `{ action: "email_sent", draft_id, sent_at }`
+
+```sql
+-- JSONB query to find signal by thread_id
+UPDATE public.jake_signals
+SET status = 'acted', acted_by = 'gmail_pubsub', acted_at = NOW()
+WHERE status = 'pending'
+  AND source_flow = 'lead_intake'
+  AND id = (
+    SELECT s.id FROM public.jake_signals s,
+    jsonb_each(s.detail->'draft_id_map') AS kv
+    WHERE s.status = 'pending'
+      AND s.source_flow = 'lead_intake'
+      AND kv.value->>'thread_id' = %s
+    LIMIT 1
+  )
+RETURNING id, resume_url, detail
+```
+
+**Full webhook flow** (`f/switchboard/gmail_pubsub_webhook`):
 
 ```
-1. Gmail mailbox change (new email received OR email sent)
+gmail_pubsub_webhook runs:
          │
-2. Gmail detects label change on teamgotcher@gmail.com (SENT or INBOX)
-         │
-3. Gmail pushes to GCP Pub/Sub topic:
-         │   { emailAddress: "teamgotcher@gmail.com", historyId: 1001 }
-         │   (base64-encoded in the Pub/Sub message envelope)
-         │
-4. Pub/Sub push subscription POSTs to Windmill webhook:
-         │   https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/{TOKEN}/p/f/switchboard/gmail_pubsub_webhook
-         │
-5. gmail_pubsub_webhook runs:
-         │
-         ├── Decode base64 → get historyId (1001)
-         ├── Read stored cursor from f/switchboard/gmail_last_history_id (e.g. 1000)
-         ├── Query Gmail History API: "what changed between 1000 and 1001?"
-         │     → Returns list of messageAdded events (no label filter)
+         ├── Decode base64 → get historyId
+         ├── Read stored cursor from f/switchboard/gmail_last_history_id
+         ├── Query Gmail History API: "what changed since cursor?"
+         │     → Returns list of messageAdded events
          │
          ├── For each message with SENT label:
-         │     ├── Fetch X-Lead-Intake-* headers
-         │     ├── If X-Lead-Intake-Draft-ID exists:
-         │     │     ├── Query jake_signals for matching draft_id
-         │     │     └── POST to resume_url: { action: "email_sent", ... }
-         │     └── Otherwise: silently ignore (normal sent email)
+         │     ├── Fetch threadId (minimal format, 1 API call)
+         │     ├── Search jake_signals for matching thread_id
+         │     │     ├── Found → POST to resume_url (Module F runs)
+         │     │     └── Not found → skip (normal sent email)
          │
          ├── For each message with INBOX label:
          │     ├── Fetch sender + subject (metadata only)
@@ -385,14 +393,39 @@ A single webhook (`f/switchboard/gmail_pubsub_webhook`) handles both SENT detect
          │     └── Add parsed lead to leads_batch
          │
          ├── If leads_batch not empty:
-         │     └── POST to lead_intake flow: { leads: leads_batch }
+         │     └── Group by email, fire one lead_intake flow per person
          │
-         └── Save new historyId (1001) to f/switchboard/gmail_last_history_id
+         └── Save new historyId to f/switchboard/gmail_last_history_id
 ```
 
-**Single cursor, single subscription:** Both SENT and INBOX events come through the same Pub/Sub subscription and use the same `gmail_last_history_id` cursor. The webhook branches on the `labelIds` array that comes with each `messageAdded` event.
+**Gmail History ID explained:** Every change in a Gmail mailbox increments a counter. When the webhook runs, it asks Gmail "what happened between my last checkpoint and now?" This range query handles batched changes (e.g., 3 emails sent quickly may produce only 1 notification).
 
-**Gmail History ID explained:** Every change in a Gmail mailbox increments a counter. The history ID is that counter value. When a Pub/Sub notification arrives with `historyId: 1001`, the webhook asks Gmail "what happened between my last checkpoint and 1001?" This range query is necessary because Gmail may batch multiple changes into a single notification (e.g., 3 emails sent quickly may produce only 1 notification with the latest history ID).
+### Polling Trigger
+
+Google Pub/Sub push cannot reach Windmill because rrg-server is behind Tailscale (no public push endpoint). Instead, a **polling trigger** checks Gmail every minute.
+
+**Script:** `f/switchboard/gmail_polling_trigger`
+**Schedule:** `0 */1 * * * *` (every 1 minute, Windmill 6-field cron)
+
+```
+Every 1 minute:
+         │
+    Get Gmail profile → current historyId
+         │
+    Compare to f/switchboard/gmail_last_history_id
+         │
+    ┌────┴────┐
+    │ Same?   │──── yes → return { skipped: true }
+    └────┬────┘
+         │ no (changes detected)
+         ▼
+    Build simulated Pub/Sub message (same format as real push)
+    Call wmill.run_script_async("f/switchboard/gmail_pubsub_webhook")
+         │
+    return { triggered: true, webhook_job_id: ... }
+```
+
+**Why `run_script_async`?** Using synchronous `run_script` would deadlock — the polling trigger holds a worker slot while waiting for the webhook, but the webhook needs a free worker slot to run. Async dispatch avoids this.
 
 ### Apps Script Fallback (Deletion Detection)
 
@@ -434,23 +467,6 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 
 ---
 
-## X-Lead-Intake Headers
-
-Module D embeds custom headers in each Gmail draft. These headers are invisible to the email recipient but travel with the message content. When Gmail assigns a new message ID on send (draft IDs and message IDs are destroyed when a draft is sent), the headers survive inside the sent message. This is how the Pub/Sub webhook matches a sent email back to the original lead intake flow.
-
-| Header | Purpose |
-|--------|---------|
-| `X-Lead-Intake-Draft-ID` | Original Gmail draft ID (primary lookup key) |
-| `X-Lead-Intake-Message-ID` | Original notification message ID |
-| `X-Lead-Intake-Thread-ID` | Gmail thread ID |
-| `X-Lead-Intake-WiseAgent-Client-ID` | WiseAgent CRM client ID |
-| `X-Lead-Intake-WiseAgent-Deal-ID` | Associated deal ID |
-| `X-Lead-Intake-Phone` | Lead's phone number |
-| `X-Lead-Intake-Name` | Lead's name |
-| `X-Lead-Intake-Email` | Lead's email address |
-
----
-
 ## Windmill Resources and Variables
 
 **Resources (credentials/connections):**
@@ -475,7 +491,8 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 | Script | Purpose |
 |--------|---------|
 | `get_pending_draft_signals` | Query pending lead_intake signals with draft_id_map (used by Apps Script) |
-| `gmail_pubsub_webhook` | Receives Gmail Pub/Sub notifications — SENT: triggers resume; INBOX: categorizes, labels, triggers lead intake |
+| `gmail_pubsub_webhook` | Processes Gmail changes — SENT: thread_id match → triggers resume; INBOX: categorizes, labels, triggers lead intake |
+| `gmail_polling_trigger` | Polls Gmail every 1 min, dispatches webhook async if history changed (replaces Pub/Sub push) |
 | `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch, renew every 6 days |
 | `check_gmail_watch_health` | Daily 10 AM ET — alerts via SMS if webhook hasn't run in 48h |
 | `act_signal` | Marks signal as acted in Postgres (does NOT resume/cancel suspended flows) |
@@ -490,10 +507,13 @@ Module D embeds custom headers in each Gmail draft. These headers are invisible 
 1. ~~Module F processes all drafts on any resume~~ — **Fixed:** Hopper architecture (one flow per person) means each flow has exactly 1 draft.
 2. ~~Module F's `draft_deleted` branch unreachable~~ — **Fixed:** Apps Script now POSTs to `resume_url` (not `cancel_url`), so Module F runs and writes CRM rejection notes.
 3. ~~`act_signal` does not wake suspended flows~~ — **By design:** Router UI is read-only for lead intake. Gmail IS the UI (send = approve, delete = reject).
-4. ~~`sent_at` never populated~~ — **Fixed:** Both Pub/Sub webhook and Apps Script now include `sent_at` in resume payloads.
+4. ~~`sent_at` never populated~~ — **Fixed:** Both webhook and Apps Script now include `sent_at` in resume payloads.
 5. ~~`timeout: 0` zombie flows~~ — **By design:** Suspended flows are visible reminders. With hopper architecture, each has exactly 1 draft.
 6. ~~Pub/Sub webhook `lead_data` ignored~~ — **Fixed:** Removed dead-weight `lead_data` from resume payload.
 7. ~~Lead parsing fails silently~~ — **Mitigated:** `validate_lead()` cross-checks fields. Failed/invalid parses downgrade to "Unlabeled" label. New contact creations logged to `contact_creation_log` table for retroactive batch-fix.
+8. ~~Gmail strips custom X-headers when drafts are sent~~ — **Fixed:** Removed all `X-Lead-Intake-*` headers from Module D. SENT matching now uses thread_id (stable across draft→sent) via JSONB query on `jake_signals.detail.draft_id_map`.
+9. ~~Pub/Sub push can't reach Windmill behind Tailscale~~ — **Fixed:** Added polling trigger (`f/switchboard/gmail_polling_trigger`) that runs every 1 minute and dispatches webhook async. ~1 minute latency instead of ~2 seconds, but reliable.
+10. ~~Zombie flows when no drafts exist~~ — **Fixed:** Added `stop_after_if: result.skipped == true` on Module E. Flows with no drafts (no email, info requests only) terminate cleanly instead of suspending forever.
 
 **Remaining:**
 - **Lead parsing is regex-based.** If a notification source changes their email format, the parser may fail. Downgrade-to-Unlabeled makes format changes visible (emails pile up in Unlabeled). Monitor `downgraded_to_unlabeled: true` in webhook output.
@@ -508,16 +528,15 @@ The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth cl
 **Project:** `rrg-gmail-automation` (TeamGotcher Google account)
 **Topic:** `gmail-sent-notifications`
 
-The topic and push subscription should already exist from the original SENT-only setup. The only change needed is to update the `f/switchboard/gmail_oauth` Windmill resource so its `client_id` and `client_secret` come from the `rrg-gmail-automation` GCP project (not `claude-connector-484817`). Then run `f/switchboard/setup_gmail_watch` to activate the watch with INBOX added.
+**Note:** Pub/Sub push subscriptions cannot reach Windmill (behind Tailscale). The polling trigger (`f/switchboard/gmail_polling_trigger`) replaces push delivery. The Pub/Sub topic and Gmail watch are still required for the Gmail History API to work — the watch tells Gmail to track changes, even though we poll for them instead of receiving pushes.
 
 **If setting up from scratch (GCP Console):**
 1. Go to Pub/Sub → Topics → Create Topic: `gmail-sent-notifications`
 2. On the topic, add IAM binding: `gmail-api-push@system.gserviceaccount.com` → role `Pub/Sub Publisher`
-3. Create a Push Subscription on the topic:
-   - Endpoint URL: `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/{TOKEN}/p/f/switchboard/gmail_pubsub_webhook`
-   - (The `{TOKEN}` is the Windmill webhook token, visible in the Windmill UI)
+3. (Push subscription is optional — polling trigger handles delivery)
 4. Run `f/switchboard/setup_gmail_watch` to activate the watch
+5. Create schedule `f/switchboard/gmail_polling_schedule` — cron `0 */1 * * * *` — targeting `f/switchboard/gmail_polling_trigger`
 
 ---
 
-*Last updated: February 18, 2026 — Hopper architecture, Module A creates contacts, Module F simplified*
+*Last updated: February 18, 2026 — X-headers removed (Gmail strips them), thread_id matching, polling trigger, stop_after_if zombie fix*
