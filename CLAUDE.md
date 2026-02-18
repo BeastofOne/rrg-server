@@ -122,13 +122,15 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 - `s/switchboard/get_pending_draft_signals` — Check draft signals
 
 ### Gmail Integration
-- OAuth: `f/switchboard/gmail_oauth` (teamgotcher@gmail.com)
-- Pub/Sub: `f/switchboard/gmail_pubsub_webhook` — handles both SENT and INBOX
+- OAuth: `f/switchboard/gmail_oauth` (teamgotcher@gmail.com, GCP project `rrg-gmail-automation`)
+- Polling: `f/switchboard/gmail_polling_trigger` — runs every 1 minute, checks historyId for changes, dispatches webhook async
+- Webhook: `f/switchboard/gmail_pubsub_webhook` — handles both SENT and INBOX
   - **SENT path:** Detects lead intake drafts being sent, triggers Module F resume
   - **INBOX path:** Categorizes ALL incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
 - Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
 - Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h
 - GCP: topic `gmail-sent-notifications` in project `rrg-gmail-automation` (TeamGotcher)
+- Note: Pub/Sub push can't reach Windmill (behind Tailscale), so polling replaces push delivery
 
 ### Message Router (`f/switchboard/message_router`)
 - Routes to rrg-pnl (port 8100) or rrg-brochure (port 8101)
@@ -141,8 +143,8 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 ### Windmill Resources
 | Resource | Purpose |
 |----------|---------|
-| `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed, shared by lead intake + NDA handler) |
-| `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com |
+| `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed, includes client_id/secret for refresh) |
+| `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com (GCP: rrg-gmail-automation) |
 | `f/switchboard/pg` | Postgres connection (jake_signals table) |
 | `f/switchboard/tailscale_machines` | Network configs + SSH passwords |
 
