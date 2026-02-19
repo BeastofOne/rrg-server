@@ -1,7 +1,7 @@
 # Lead Intake Pipeline
 
 > **Flow path:** `f/switchboard/lead_intake`
-> **Last verified:** February 18, 2026
+> **Last verified:** February 19, 2026
 
 The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realtor.com, and the Seller Hub. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
@@ -158,9 +158,13 @@ Input: { leads: [{name, email, phone, source, source_type, property_name, ...}] 
 | **Input** | `flow_input.leads` |
 | **Output** | Enriched leads array |
 
-Searches WiseAgent CRM by email for each lead. If the contact doesn't exist, **creates it immediately** (moved from Module F). This ensures every lead exits Module A with a valid `wiseagent_client_id`, which is embedded in `X-Lead-Intake-WiseAgent-Client-ID` headers by Module D.
+Searches WiseAgent CRM by email for each lead. If the contact doesn't exist, **creates it immediately** (moved from Module F). This ensures every lead exits Module A with a valid `wiseagent_client_id`.
 
-Also determines whether the contact has a signed NDA and whether outreach has already been sent (by checking contact notes for "outreach sent" / "initial outreach").
+Also determines whether the contact has a signed NDA and whether this is a followup (by checking for "Lead Intake" notes from the last 7 days).
+
+**Followup detection:** For existing contacts, Module A checks WiseAgent notes for any note with subject containing "Lead Intake" created in the last 7 days. If found → `is_followup = True`. Followup requires BOTH: (1) contact already existed (not just created), and (2) has a recent "Lead Intake" note.
+
+**Lead Intake note writing:** After the followup check, Module A writes a "Lead Intake" note for ALL leads (new and existing) with a `wiseagent_client_id`. This note is what future runs will find when determining followup status. The note is written AFTER the followup check so the current note doesn't count for the current lead.
 
 New contact creations are logged to the `contact_creation_log` Postgres table for audit/batch-fix purposes.
 
@@ -170,7 +174,7 @@ New contact creations are logged to the `contact_creation_log` Postgres table fo
 - `wiseagent_client_id` — CRM client ID (always populated — created if new)
 - `is_new` — true if contact was just created
 - `has_nda` — true if contact has "NDA Signed" category
-- `is_followup` — true if outreach notes already exist
+- `is_followup` — true if existing contact has a "Lead Intake" note from the last 7 days
 - `wiseagent_status`, `wiseagent_rank` — CRM fields (existing contacts only)
 
 ---
@@ -225,19 +229,24 @@ Each grouped lead carries all properties as a `properties[]` array and collects 
 
 The largest module. Selects an email template for each lead based on source type and context, then creates Gmail drafts via the Gmail API.
 
-**Template selection logic:**
+**Name validation:** Uses `get_first_name()` which validates the first word of the lead's name against a set of ~500 common US first names (SSA data). If recognized → "Hey John,". If not recognized (company names like "Bridgerow Blinds") → "Hey there,".
 
-| Source Type | Condition | Template |
-|------------|-----------|----------|
-| `realtor_com` | — | Tour inquiry response |
-| `seller_hub` | — | Seller outreach |
-| Any | All properties are lead magnets | Lead magnet response (uses `response_override`) |
-| `crexi_om` / `crexi_flyer` / `loopnet` | Multiple properties, not followup | Multi-property intro |
-| `crexi_om` / `crexi_flyer` / `loopnet` | Multiple properties, is followup | Multi-property followup |
-| `crexi_om` / `crexi_flyer` / `loopnet` | Single property, not followup | Single property intro |
-| `crexi_om` / `crexi_flyer` / `loopnet` | Single property, is followup | Single property followup |
+**Template selection logic (order matters):**
 
-**Follow-up detection:** Beyond WiseAgent notes (Module A), Module D also checks Gmail sent folder for recent emails to the same address (last 7 days). If found, overrides `is_followup` to true.
+| Priority | Source Type | Condition | Template | Signed By |
+|----------|------------|-----------|----------|-----------|
+| 1 | `realtor_com` | — | Tour inquiry response | Jake |
+| 2 | `seller_hub` | — | Seller outreach | Jake |
+| 3 | Any | All properties are lead magnets | Lead magnet response (uses `response_override`) | Jake |
+| 4 | `crexi_om` / `crexi_flyer` / `loopnet` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
+| 5 | `crexi_om` / `crexi_flyer` / `loopnet` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
+| 6 | `crexi_om` / `crexi_flyer` / `loopnet` | Single property, followup | `commercial_followup_template` | Larry |
+| 7 | `crexi_om` / `crexi_flyer` / `loopnet` | Single property, first contact | `commercial_first_outreach_template` | Larry |
+| 8 | Unknown | — | Skip (no draft created) | — |
+
+**Commercial templates (Crexi/LoopNet):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
+
+**Followup detection:** Comes entirely from Module A (WiseAgent notes). Module D does NOT check Gmail sent folder.
 
 **Gmail draft creation** is a single API call per draft — `drafts().create()`. No custom headers are added because **Gmail strips all custom X- headers when a draft is sent**. Instead, the `thread_id` returned by the create call is stored and used for SENT matching (thread IDs are stable across draft→sent transitions).
 
@@ -515,6 +524,10 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 9. ~~Pub/Sub push can't reach Windmill behind Tailscale~~ — **Fixed:** Added polling trigger (`f/switchboard/gmail_polling_trigger`) that runs every 1 minute and dispatches webhook async. ~1 minute latency instead of ~2 seconds, but reliable.
 10. ~~Zombie flows when no drafts exist~~ — **Fixed:** Added `stop_after_if: result.skipped == true` on Module E. Flows with no drafts (no email, info requests only) terminate cleanly instead of suspending forever.
 
+**Resolved (Feb 19, 2026):**
+11. ~~Followup detection broken — `check_followup` searched notes for "outreach sent" / "initial outreach" but no note ever contained those phrases~~ — **Fixed:** Module A now checks for "Lead Intake" notes from the last 7 days AND writes a "Lead Intake" note for every lead processed. Gmail sent-folder check in Module D removed.
+12. ~~Commercial templates signed by Jake instead of Larry~~ — **Fixed:** All Crexi/LoopNet templates now signed by Larry with phone (734) 732-3789. No brochure highlights. Name validation against ~500 SSA names (company names get "Hey there,").
+
 **Remaining:**
 - **Lead parsing is regex-based.** If a notification source changes their email format, the parser may fail. Downgrade-to-Unlabeled makes format changes visible (emails pile up in Unlabeled). Monitor `downgraded_to_unlabeled: true` in webhook output.
 - **No automated backups** for `jake_signals` or `contact_creation_log` tables.
@@ -539,4 +552,4 @@ The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth cl
 
 ---
 
-*Last updated: February 18, 2026 — X-headers removed (Gmail strips them), thread_id matching, polling trigger, stop_after_if zombie fix*
+*Last updated: February 19, 2026 — Commercial templates simplified (Larry signoff, no brochure highlights), followup detection fixed (WiseAgent "Lead Intake" notes), name validation (SSA data), Gmail sent-folder check removed*
