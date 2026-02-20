@@ -20,7 +20,7 @@ rrg-server/
 **Four machines on Tailscale** (details → `.claude/rules/network.md`):
 - **jake-macbook** — Claude Code, claude-endpoint (pm2)
 - **rrg-server** — Docker containers (pnl, brochure), Windmill, Postgres, DocuSeal
-- **pixel-9a** — SMS gateway for Crexi/LoopNet leads (Termux + Flask, port 8686)
+- **pixel-9a** — SMS gateway for Crexi/LoopNet/BizBuySell leads (Termux + Flask, port 8686)
 - **larry-sms-gateway** — iMessage relay
 
 **Worker pattern:** rrg-pnl and rrg-brochure are identical Flask microservices behind a message router. Both expose `POST /process` with the same request/response contract:
@@ -135,7 +135,7 @@ Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubs
 - Polling: `f/switchboard/gmail_polling_trigger` — runs every 1 minute, checks historyId for changes, dispatches webhook async
 - Webhook: `f/switchboard/gmail_pubsub_webhook` — handles SENT, INBOX, and reply detection
   - **SENT path:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume. Searches both `lead_intake` and `lead_conversation` signals.
-  - **INBOX path (lead notifications):** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
+  - **INBOX path (lead notifications):** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
   - **INBOX path (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals to detect replies to our outreach. If match found, applies "Lead Reply" label and triggers `f/switchboard/lead_conversation`
 - Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
 - Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h
@@ -161,7 +161,7 @@ Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubs
 ### Windmill Variables
 | Variable | Purpose |
 |----------|---------|
-| `f/switchboard/property_mapping` | Property alias-to-deal mapping (JSON, 21 properties). Supports optional `documents` field per property for file paths. |
+| `f/switchboard/property_mapping` | Property alias-to-deal mapping (JSON, 21 properties). Includes Crexi/LoopNet/BizBuySell aliases. Supports optional `documents` field per property for file paths. |
 | `f/switchboard/gmail_last_history_id` | Last processed Gmail history ID for webhook |
 | `f/switchboard/sms_gateway_url` | Pixel 9a SMS gateway endpoint |
 | `f/switchboard/claude_endpoint_url` | Claude API proxy on jake-macbook (port 8787) |

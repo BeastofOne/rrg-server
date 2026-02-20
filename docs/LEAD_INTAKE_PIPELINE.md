@@ -3,7 +3,7 @@
 > **Flow path:** `f/switchboard/lead_intake`
 > **Last verified:** February 19, 2026
 
-The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, Realtor.com, and the Seller Hub. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
+The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, and the Seller Hub. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
 ---
 
@@ -48,6 +48,7 @@ Gmail Pub/Sub notification → Windmill webhook
     ┌─────────────────────────────────────────────────────────┐
     │ notifications.crexi.com          → label "Crexi"        │
     │ loopnet.com + "favorited"        → label "LoopNet"      │
+    │ bizbuysell.com                   → label "BizBuySell"   │
     │ subject: "New realtor.com lead…" → label "Realtor.com"  │
     │ subject: "New Verified Seller…"  → label "Seller Hub"   │
     │ everything else                  → label "Unlabeled"    │
@@ -55,7 +56,7 @@ Gmail Pub/Sub notification → Windmill webhook
          │
     Apply Gmail label to message
          │
-    Is it a lead source? (Crexi/LoopNet/Realtor.com/Seller Hub)
+    Is it a lead source? (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub)
     ┌────┴────┐
     │  yes    │──── no ─── Is it a reply to outreach?
     └────┬────┘            (thread_id matches acted signal)
@@ -93,6 +94,7 @@ Gmail Pub/Sub notification → Windmill webhook
 |--------|-------------|---------------|-------------|------------|
 | Crexi | `notifications.crexi.com` | — | "Crexi" | Yes (source_type from body: om/flyer/info_request) |
 | LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes |
+| BizBuySell | `bizbuysell.com` | — | "BizBuySell" | Yes (source_type: bizbuysell, property from subject) |
 | Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes |
 | Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes |
 | Reply to outreach | — | — (thread_id matches acted signal) | "Lead Reply" | No (triggers `lead_conversation`) |
@@ -199,7 +201,7 @@ New contact creations are logged to the `contact_creation_log` Postgres table fo
 
 Matches lead property names against the `f/switchboard/property_mapping` Windmill variable. This variable contains a JSON mapping of property aliases to canonical names with metadata.
 
-Only applies to `crexi_om`, `crexi_flyer`, and `loopnet` source types. Other source types get `is_mapped: null`.
+Only applies to `crexi_om`, `crexi_flyer`, `loopnet`, and `bizbuysell` source types. Other source types get `is_mapped: null`.
 
 **Fields added to each lead:**
 - `is_mapped` — true/false/null
@@ -247,13 +249,13 @@ The largest module. Selects an email template for each lead based on source type
 | 1 | `realtor_com` | — | Tour inquiry response | Jake |
 | 2 | `seller_hub` | — | Seller outreach | Jake |
 | 3 | Any | All properties are lead magnets | Lead magnet response (uses `response_override`) | Jake |
-| 4 | `crexi_om` / `crexi_flyer` / `loopnet` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
-| 5 | `crexi_om` / `crexi_flyer` / `loopnet` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
-| 6 | `crexi_om` / `crexi_flyer` / `loopnet` | Single property, followup | `commercial_followup_template` | Larry |
-| 7 | `crexi_om` / `crexi_flyer` / `loopnet` | Single property, first contact | `commercial_first_outreach_template` | Larry |
+| 4 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
+| 5 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
+| 6 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Single property, followup | `commercial_followup_template` | Larry |
+| 7 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Single property, first contact | `commercial_first_outreach_template` | Larry |
 | 8 | Unknown | — | Skip (no draft created) | — |
 
-**Commercial templates (Crexi/LoopNet):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
+**Commercial templates (Crexi/LoopNet/BizBuySell):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
 
 **Followup detection:** Comes entirely from Module A (WiseAgent notes). Module D does NOT check Gmail sent folder.
 
@@ -568,4 +570,4 @@ The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth cl
 
 ---
 
-*Last updated: February 20, 2026 — Added reply detection (unlabeled emails → thread_id match → lead_conversation), updated SENT path SQL to match both lead_intake and lead_conversation signals, added claude_endpoint_url variable*
+*Last updated: February 20, 2026 — Added BizBuySell as lead source (categorization, parsing, commercial templates, property mapping aliases). Added reply detection (unlabeled emails → thread_id match → lead_conversation), updated SENT path SQL to match both lead_intake and lead_conversation signals, added claude_endpoint_url variable*
