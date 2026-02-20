@@ -1,6 +1,8 @@
 # Claude Email Assistant
 
-Jake's email automation tool — inbox management, lead processing, and response drafting via MCP integrations.
+Jake's email automation tool — inbox management and response drafting via MCP integrations.
+
+> **Note:** Lead intake from Crexi/LoopNet/Realtor.com/Seller Hub is now fully automated via Windmill (`f/switchboard/lead_intake` and `f/switchboard/lead_conversation`). This tool is for manual email work only.
 
 ## MCP Tools
 
@@ -18,13 +20,6 @@ Jake's email automation tool — inbox management, lead processing, and response
 - `hubspot__add_note` — Add note to contact
 - `hubspot__get_contact` — Get full details by ID
 
-### httpSMS MCP
-- `mcp__httpsms__httpsms_send` — Send text via Jake's Android phone
-- `mcp__httpsms__httpsms_bulk_send` — Send to multiple recipients
-- `mcp__httpsms__httpsms_get_messages` — View conversation
-- `mcp__httpsms__httpsms_search_messages` — Search history
-- Phone format: E.164 (`+1XXXXXXXXXX`)
-
 ## Email Processing Rules
 
 ### Auto-Delete (Gmail filters handle these)
@@ -32,11 +27,8 @@ Jake's email automation tool — inbox management, lead processing, and response
 - Crexi Property Recommendations (`emails@search.crexi.com` + "12 New properties")
 - LoopNet Larry duplicates (`leads@loopnet.com` + "Hi Larry,")
 
-### Lead Notifications → Use lead-workflow rule
-LoopNet, Crexi, Realtor.com, Seller Hub notifications trigger the 6-step lead processing workflow. See `.claude/rules/lead-workflow.md` (auto-loaded).
-
-### Bulk Outreach → Use outreach skill
-Crexi spreadsheet-based bulk outreach. Invoke with `/outreach` or load `.claude/skills/outreach/SKILL.md`.
+### Lead Notifications (Automated)
+LoopNet, Crexi, Realtor.com, Seller Hub notifications are handled automatically by Windmill. See `docs/LEAD_INTAKE_PIPELINE.md`.
 
 ## Communication Style
 
@@ -64,14 +56,6 @@ Crexi spreadsheet-based bulk outreach. Invoke with `/outreach` or load `.claude/
 4. **Err on the side of flagging** — If unsure, flag for Jake
 5. **Batch similar actions** — "Here are 12 promotional emails to delete"
 
-## Session Workflow
-
-**Start:** `/context-restore email-assistant` — check for incomplete work
-**Process:** Read emails → categorize → present to Jake → execute approved actions
-**End:** `/context-save email-assistant` — save incomplete work (pending leads, unapproved drafts)
-
-Context saved to: `.claude/context/pending_YYYY-MM-DD.md`
-
 ## Email Templates
 Property-specific templates (Parkwood, DQ, Mattawan, etc.) → `email_templates.md`
 
@@ -82,4 +66,3 @@ Property-specific templates (Parkwood, DQ, Mattawan, etc.) → `email_templates.
 
 ## Key Locations
 - **Listings Drive:** `https://drive.google.com/drive/folders/0AFzQDGf_yuoLUk9PVA`
-- **Commands:** `.claude/commands/` (context-save, context-restore)

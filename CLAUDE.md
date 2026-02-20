@@ -243,7 +243,6 @@ pm2 logs claude-endpoint
 | `docs/CURRENT_STATE.md` | Verified technical details |
 | `docs/LEAD_INTAKE_PIPELINE.md` | Lead intake flow detail (6 modules, resume mechanism) |
 | `docs/LEAD_CONVERSATION_ENGINE.md` | Lead conversation engine detail (4 modules, intent classification) |
-| `docs/mermaid/*.mmd` | Standalone diagram source files |
 
 ## Reference Files
 - Network/IPs/ports → `.claude/rules/network.md`

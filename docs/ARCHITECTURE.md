@@ -98,7 +98,8 @@ graph TB
 
     subgraph CLOUD["CLOUD SERVICES"]
         HUBSPOT["HubSpot API"]
-        GMAIL["Gmail SMTP"]
+        WISEAGENT["WiseAgent API"]
+        GMAIL["Gmail API"]
         ANTHROPIC["Anthropic API"]
     end
 
@@ -122,6 +123,10 @@ graph TB
 
     %% DocuSeal → Gmail
     DOCUSEAL --> GMAIL
+
+    %% Windmill → external APIs
+    WM_WORKER -->|"lead flows"| WISEAGENT
+    WM_WORKER -->|"Gmail API"| GMAIL
 
     %% Claude CLI MCP connections
     CLAUDE_CLI --> MCP_HS
@@ -190,7 +195,7 @@ graph TB
     end
 
     subgraph EXTERNAL["EXTERNAL SERVICES"]
-        HUBSPOT["HubSpot CRM"]
+        WISEAGENT["WiseAgent CRM"]
         CLAUDE["Anthropic API"]
         GMAIL_API["Gmail API"]
     end
@@ -207,13 +212,14 @@ graph TB
     T_NDA --> DS_CREATE --> DS_EMAIL --> DS_SIGN
     T_SIGN --> DS_HOOK
     DS_SIGN --> DS_HOOK
-    DS_HOOK --> DS_HANDLER --> HUBSPOT
+    DS_HOOK --> DS_HANDLER --> WISEAGENT
 
     %% Windmill flows
-    T_SCHED --> LEAD --> HUBSPOT
+    T_SCHED --> LEAD --> WISEAGENT
     T_GMAIL --> GMAIL_WH --> SIG_W
     GMAIL_WH -->|"reply detected"| CONV
     CONV --> CLAUDE
+    CONV --> WISEAGENT
     CONV --> SIG_W
 
     %% Signal pipeline
