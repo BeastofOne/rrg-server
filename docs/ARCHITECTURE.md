@@ -181,6 +181,7 @@ graph TB
 
     subgraph SWITCHBOARD["WINDMILL SWITCHBOARD"]
         LEAD["lead_intake<br/>Process incoming leads"]
+        CONV["lead_conversation<br/>Classify + respond to replies"]
         SIG_W["write_signal"]
         SIG_R["read_signals"]
         SIG_A["act_signal"]
@@ -211,6 +212,9 @@ graph TB
     %% Windmill flows
     T_SCHED --> LEAD --> HUBSPOT
     T_GMAIL --> GMAIL_WH --> SIG_W
+    GMAIL_WH -->|"reply detected"| CONV
+    CONV --> CLAUDE
+    CONV --> SIG_W
 
     %% Signal pipeline
     SIG_W --> SIG_R --> SIG_A
@@ -236,6 +240,8 @@ graph TB
 ## Lead Intake Pipeline (Detail)
 
 The lead intake flow (`f/switchboard/lead_intake`) is the most complex workflow. It spans Windmill, Gmail, Google Cloud Pub/Sub, and a Google Apps Script. Full documentation: [`docs/LEAD_INTAKE_PIPELINE.md`](LEAD_INTAKE_PIPELINE.md).
+
+The lead conversation engine (`f/switchboard/lead_conversation`) handles replies to outreach emails — classifying intent and generating response drafts. Full documentation: [`docs/LEAD_CONVERSATION_ENGINE.md`](LEAD_CONVERSATION_ENGINE.md).
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#43a047', 'lineColor': '#43a047'}}}%%
@@ -292,6 +298,60 @@ graph TB
     style DETECTION fill:#f3e5f5,stroke:#ab47bc
     style EXTERNAL fill:#fce4ec,stroke:#ef5350
     style E fill:#fff9c4,stroke:#f9a825
+```
+
+## Lead Conversation Engine (Detail)
+
+The conversation engine (`f/switchboard/lead_conversation`) processes replies to CRE outreach emails. Triggered by `gmail_pubsub_webhook` when an unlabeled INBOX email's thread_id matches an acted signal.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#fff3e0', 'primaryTextColor': '#e65100', 'primaryBorderColor': '#fb8c00', 'lineColor': '#fb8c00'}}}%%
+
+graph TB
+    subgraph TRIGGER["TRIGGER"]
+        REPLY["Reply arrives in INBOX<br/>(unlabeled email)"]
+        MATCH{"Thread_id matches<br/>acted signal?"}
+    end
+
+    subgraph CONV_FLOW["WINDMILL: f/switchboard/lead_conversation"]
+        direction TB
+        A["<b>Module A</b><br/>Fetch Thread +<br/>Classify Intent<br/>(Claude haiku)"]
+        B["<b>Module B</b><br/>Generate Response<br/>Draft + Gmail API"]
+        C["<b>Module C</b><br/>Approval Gate<br/><i>⏸ SUSPEND</i>"]
+        D["<b>Module D</b><br/>Post-Approval<br/>(CRM + SMS)"]
+    end
+
+    subgraph CLASSIFY["CLASSIFICATIONS"]
+        INT["INTERESTED<br/>(offer / want_something /<br/>general_interest)"]
+        IGN["IGNORE<br/>(auto-reply, spam)"]
+        NOT["NOT_INTERESTED<br/>(wrong person, unsubscribe)"]
+        ERR["ERROR<br/>(parse failure)"]
+    end
+
+    subgraph TERMINAL["TERMINAL STATES"]
+        T_IGN["CRM note only<br/>(flow stops)"]
+        T_OFFER["Signal + CRM note<br/>(flow stops)"]
+    end
+
+    REPLY --> MATCH
+    MATCH -->|"Yes"| A
+    MATCH -->|"No"| SKIP["Label: Unlabeled<br/>(not a reply)"]
+
+    A --> INT & IGN & NOT & ERR
+
+    IGN --> T_IGN
+    ERR --> T_IGN
+    INT -->|"OFFER"| T_OFFER
+    INT -->|"WANT_SOMETHING /<br/>GENERAL_INTEREST"| B
+    NOT --> B
+
+    B --> C --> D
+
+    style TRIGGER fill:#e3f2fd,stroke:#42a5f5
+    style CONV_FLOW fill:#e8f5e9,stroke:#43a047
+    style CLASSIFY fill:#fff3e0,stroke:#ffb300
+    style TERMINAL fill:#fce4ec,stroke:#ef5350
+    style C fill:#fff9c4,stroke:#f9a825
 ```
 
 ---
@@ -360,5 +420,5 @@ As of Feb 14, 2026: **94% full (6.4GB free)**. Largest consumers:
 
 ---
 
-*Last verified: February 18, 2026*
+*Last verified: February 20, 2026*
 *Source: Direct SSH inspection + dataflow analysis*

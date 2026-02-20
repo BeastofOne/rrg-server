@@ -57,8 +57,16 @@ Gmail Pub/Sub notification → Windmill webhook
          │
     Is it a lead source? (Crexi/LoopNet/Realtor.com/Seller Hub)
     ┌────┴────┐
-    │  yes    │──── no ─── done (labeled only)
-    └────┬────┘
+    │  yes    │──── no ─── Is it a reply to outreach?
+    └────┬────┘            (thread_id matches acted signal)
+         │                 ┌────┴────┐
+         │                 │  yes    │──── no ─── done (Unlabeled)
+         │                 └────┬────┘
+         │                      │
+         │                 Relabel "Lead Reply"
+         │                 Fetch reply body
+         │                 Trigger f/switchboard/lead_conversation
+         │
          │
     Fetch full message body
     Parse: name, email, phone, property_name, source_type
@@ -87,6 +95,7 @@ Gmail Pub/Sub notification → Windmill webhook
 | LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes |
 | Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes |
 | Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes |
+| Reply to outreach | — | — (thread_id matches acted signal) | "Lead Reply" | No (triggers `lead_conversation`) |
 | Everything else | — | — | "Unlabeled" | No |
 
 **Lead parser output** (per lead, passed to `lead_intake` flow):
@@ -363,16 +372,16 @@ When a draft is sent from Gmail, the webhook matches the sent email back to its 
 4. POSTs to `resume_url` with `{ action: "email_sent", draft_id, sent_at }`
 
 ```sql
--- JSONB query to find signal by thread_id
+-- JSONB query to find signal by thread_id (matches both lead_intake and lead_conversation signals)
 UPDATE public.jake_signals
 SET status = 'acted', acted_by = 'gmail_pubsub', acted_at = NOW()
 WHERE status = 'pending'
-  AND source_flow = 'lead_intake'
+  AND source_flow IN ('lead_intake', 'lead_conversation')
   AND id = (
     SELECT s.id FROM public.jake_signals s,
     jsonb_each(s.detail->'draft_id_map') AS kv
     WHERE s.status = 'pending'
-      AND s.source_flow = 'lead_intake'
+      AND s.source_flow IN ('lead_intake', 'lead_conversation')
       AND kv.value->>'thread_id' = %s
     LIMIT 1
   )
@@ -494,13 +503,14 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 | `f/switchboard/sms_gateway_url` | SMS gateway endpoint URL (pixel-9a, Crexi/LoopNet leads only) |
 | `f/switchboard/gmail_last_history_id` | Gmail History API cursor — last processed history ID |
 | `f/switchboard/router_token` | Auth token used by gmail_pubsub_webhook for resume URL POSTs |
+| `f/switchboard/claude_endpoint_url` | Claude API proxy URL on jake-macbook (`http://100.108.74.112:8787`) |
 
 **Windmill Scripts (all under `f/switchboard/`):**
 
 | Script | Purpose |
 |--------|---------|
 | `get_pending_draft_signals` | Query pending lead_intake signals with draft_id_map (used by Apps Script) |
-| `gmail_pubsub_webhook` | Processes Gmail changes — SENT: thread_id match → triggers resume; INBOX: categorizes, labels, triggers lead intake |
+| `gmail_pubsub_webhook` | Processes Gmail changes — SENT: thread_id match → triggers resume; INBOX: categorizes, labels, triggers lead intake; reply detection → triggers lead_conversation |
 | `gmail_polling_trigger` | Polls Gmail every 1 min, dispatches webhook async if history changed (replaces Pub/Sub push) |
 | `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch, renew every 6 days |
 | `check_gmail_watch_health` | Daily 10 AM ET — alerts via SMS if webhook hasn't run in 48h |
@@ -552,4 +562,10 @@ The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth cl
 
 ---
 
-*Last updated: February 19, 2026 — Commercial templates simplified (Larry signoff, no brochure highlights), followup detection fixed (WiseAgent "Lead Intake" notes), name validation (SSA data), Gmail sent-folder check removed*
+## Related
+
+- **Lead Conversation Engine:** [`docs/LEAD_CONVERSATION_ENGINE.md`](LEAD_CONVERSATION_ENGINE.md) — handles replies to outreach emails (classification, response drafts, approval)
+
+---
+
+*Last updated: February 20, 2026 — Added reply detection (unlabeled emails → thread_id match → lead_conversation), updated SENT path SQL to match both lead_intake and lead_conversation signals, added claude_endpoint_url variable*

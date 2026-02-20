@@ -111,7 +111,16 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 5. **Approval Gate** — Suspend flow, write signal to `jake_signals` (stops cleanly if no drafts via `stop_after_if`)
 6. **Post-Approval** — SMS first, then CRM note with accurate outcome; rejection notes on draft deletion
 
-### WiseAgent CRM (lead intake only)
+### Lead Conversation Flow (`f/switchboard/lead_conversation`)
+Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubsub_webhook` when an unlabeled INBOX email's thread_id matches an acted `lead_intake` or `lead_conversation` signal. Full docs: `docs/LEAD_CONVERSATION_ENGINE.md`.
+
+4-module pipeline:
+1. **Classify Reply** — Fetch full Gmail thread, classify intent via Claude (haiku): INTERESTED (offer/want_something/general_interest), IGNORE, NOT_INTERESTED, ERROR
+2. **Generate Response** — Terminal states (IGNORE/ERROR → CRM note, OFFER → notification signal) stop here. Actionable states create Gmail reply draft via Claude
+3. **Approval Gate** — Same suspend pattern as lead_intake; draft_id_map stored for SENT matching
+4. **Post-Approval** — CRM note + SMS after user sends/deletes draft
+
+### WiseAgent CRM
 - OAuth API: `sync.thewiseagent.com`
 - Credentials: Windmill resource `f/switchboard/wiseagent_oauth` (auto-refreshed, shared with NDA handler)
 
@@ -124,9 +133,10 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 ### Gmail Integration
 - OAuth: `f/switchboard/gmail_oauth` (teamgotcher@gmail.com, GCP project `rrg-gmail-automation`)
 - Polling: `f/switchboard/gmail_polling_trigger` — runs every 1 minute, checks historyId for changes, dispatches webhook async
-- Webhook: `f/switchboard/gmail_pubsub_webhook` — handles both SENT and INBOX
-  - **SENT path:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume
-  - **INBOX path:** Categorizes ALL incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
+- Webhook: `f/switchboard/gmail_pubsub_webhook` — handles SENT, INBOX, and reply detection
+  - **SENT path:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume. Searches both `lead_intake` and `lead_conversation` signals.
+  - **INBOX path (lead notifications):** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
+  - **INBOX path (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals to detect replies to our outreach. If match found, applies "Lead Reply" label and triggers `f/switchboard/lead_conversation`
 - Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
 - Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h
 - GCP: topic `gmail-sent-notifications` in project `rrg-gmail-automation` (TeamGotcher)
@@ -147,6 +157,15 @@ Hopper architecture: webhook fires one flow per person (not one flow per batch).
 | `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com (GCP: rrg-gmail-automation) |
 | `f/switchboard/pg` | Postgres connection (jake_signals table) |
 | `f/switchboard/tailscale_machines` | Network configs + SSH passwords |
+
+### Windmill Variables
+| Variable | Purpose |
+|----------|---------|
+| `f/switchboard/property_mapping` | Property alias-to-deal mapping (JSON, 21 properties). Supports optional `documents` field per property for file paths. |
+| `f/switchboard/gmail_last_history_id` | Last processed Gmail history ID for webhook |
+| `f/switchboard/sms_gateway_url` | Pixel 9a SMS gateway endpoint |
+| `f/switchboard/claude_endpoint_url` | Claude API proxy on jake-macbook (port 8787) |
+| `f/switchboard/router_token` | Windmill API token (secret) |
 
 ## Deployment
 
@@ -222,6 +241,8 @@ pm2 logs claude-endpoint
 |------|----------|
 | `docs/ARCHITECTURE.md` | Three-layer system diagrams (Mermaid) |
 | `docs/CURRENT_STATE.md` | Verified technical details |
+| `docs/LEAD_INTAKE_PIPELINE.md` | Lead intake flow detail (6 modules, resume mechanism) |
+| `docs/LEAD_CONVERSATION_ENGINE.md` | Lead conversation engine detail (4 modules, intent classification) |
 | `docs/mermaid/*.mmd` | Standalone diagram source files |
 
 ## Reference Files
