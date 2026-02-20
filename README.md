@@ -18,6 +18,8 @@ Infrastructure documentation and configuration for the Resource Realty Group ser
 
 - [Architecture](docs/ARCHITECTURE.md) — Three-layer system diagrams (physical, services, workflows)
 - [Current State](docs/CURRENT_STATE.md) — Verified technical details
+- [Lead Intake Pipeline](docs/LEAD_INTAKE_PIPELINE.md) — Automated CRE lead processing (6 modules)
+- [Lead Conversation Engine](docs/LEAD_CONVERSATION_ENGINE.md) — Reply classification and response (4 modules)
 
 ## Related Repositories
 

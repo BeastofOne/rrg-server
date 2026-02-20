@@ -3,7 +3,7 @@
 ## What
 HTTP API proxy that accepts prompts and pipes them to `claude -p` CLI. Runs on jake-macbook via pm2 (port 8787), accessible over Tailscale at `http://100.108.74.112:8787`.
 
-External services (n8n, Windmill) call this to get LLM responses without their own Claude credentials — it uses Jake's Claude Max subscription via the CLI.
+Windmill flows on rrg-server call this to get LLM responses without their own Claude credentials — it uses Jake's Claude Max subscription via the CLI.
 
 ## Request/Response
 
@@ -59,8 +59,7 @@ Key details:
 | `CLAUDE_PATH` | `$HOME/.npm-global/bin/claude` | Path to Claude CLI binary |
 
 ## Who Calls It
-- **n8n workflows** on rrg-server — email classification, lead parsing
-- **Windmill flows** — message routing, draft generation
+- **Windmill flows** on rrg-server — lead intake, lead conversation, message routing, draft generation
 
 
 ## Manage
