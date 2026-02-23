@@ -241,6 +241,8 @@ Groups leads by email address so that one person who inquired about multiple pro
 
 Each grouped lead carries all properties as a `properties[]` array and collects all `notification_message_ids` from the original leads.
 
+**Fuzzy property dedup:** Crexi uses different property name formats depending on notification type (e.g., "CMC Transportation" for phone clicks vs "CMC Transportation in Ypsilanti" for flyer views). The `is_same_property()` helper detects when one name is a prefix of the other and the remainder starts with " in " (the city suffix). When a fuzzy match is found, the longer/more-detailed name is kept. This prevents false multi-property grouping that would trigger the wrong email template.
+
 ---
 
 ### Module D: Generate Drafts + Gmail
@@ -565,6 +567,9 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 11. ~~Followup detection broken — `check_followup` searched notes for "outreach sent" / "initial outreach" but no note ever contained those phrases~~ — **Fixed:** Module A now checks for "Lead Intake" notes from the last 7 days AND writes a "Lead Intake" note for every lead processed. Gmail sent-folder check in Module D removed.
 12. ~~Commercial templates signed by Jake instead of Larry~~ — **Fixed:** All Crexi/LoopNet templates now signed by Larry with phone (734) 732-3789. No brochure highlights. Name validation against ~500 SSA names (company names get "Hey there,").
 
+**Resolved (Feb 23, 2026):**
+13. ~~Module C exact-match property dedup treats Crexi name variants as different properties~~ — **Fixed:** Added `is_same_property()` fuzzy matching to Module C. Detects "Name" vs "Name in City" pattern (e.g., "CMC Transportation" vs "CMC Transportation in Ypsilanti"). Keeps the longer name. Prevents false multi-property grouping that selected `commercial_multi_property_first_contact` instead of `commercial_first_outreach_template`.
+
 **Remaining:**
 - **Lead parsing is regex-based.** If a notification source changes their email format, the parser may fail. Downgrade-to-Unlabeled makes format changes visible (emails pile up in Unlabeled). Monitor `downgraded_to_unlabeled: true` in webhook output.
 - **No automated backups** for `jake_signals` or `contact_creation_log` tables.
@@ -596,4 +601,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 23, 2026 — Split inbox architecture: leads@ for notifications, teamgotcher@ for drafts/replies. Switched from polling trigger to Pub/Sub push delivery (~2-5 sec). Dual OAuth, dual history cursors. Polling trigger deprecated.*
+*Last updated: February 23, 2026 — Module C fuzzy property dedup for Crexi name variants ("Name" vs "Name in City").*
