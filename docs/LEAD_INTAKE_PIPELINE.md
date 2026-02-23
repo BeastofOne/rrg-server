@@ -84,12 +84,15 @@ Gmail Pub/Sub notification → Windmill webhook
     After all messages processed:
     if leads_batch not empty →
          │
-    HOPPER ARCHITECTURE: Group leads by email address
-    Fire one flow per person (parallel)
+    STAGING + BATCHING: Write leads to staged_leads table
+    Schedule delayed processing (30s window per unique email)
          │
-    For each person group:
+    After 30s batch window (process_staged_leads script):
+    Collect all staged leads for this email, fire one lead_intake flow
+         │
+    HOPPER ARCHITECTURE: One flow per person
     POST http://localhost:8000/api/w/rrg/jobs/run/f/f/switchboard/lead_intake
-         { "leads": [leads for this person] }
+         { "leads": [all leads for this person from batch window] }
          │
          ▼
     Pipeline starts (Module A → F) — one flow per person
@@ -272,6 +275,8 @@ The largest module. Selects an email template for each lead based on source type
 | 8 | Unknown | — | Skip (no draft created) | — |
 
 **Commercial templates (Crexi/LoopNet/BizBuySell):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
+
+**Property display in templates:** `format_property_list_inline()` uses `property_address` when it has a real street address (3+ comma-delimited parts, e.g., "826 N Main St, Adrian, MI 49221" → "826 N Main St in Adrian"). For city-only addresses like "South Lyon, MI", it falls back to `canonical_name` from the property mapping.
 
 **Followup detection:** Comes entirely from Module A (WiseAgent notes). Module D does NOT check Gmail sent folder.
 
@@ -569,6 +574,8 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 
 **Resolved (Feb 23, 2026):**
 13. ~~Module C exact-match property dedup treats Crexi name variants as different properties~~ — **Fixed:** Added `is_same_property()` fuzzy matching to Module C. Detects "Name" vs "Name in City" pattern (e.g., "CMC Transportation" vs "CMC Transportation in Ypsilanti"). Keeps the longer name. Prevents false multi-property grouping that selected `commercial_multi_property_first_contact` instead of `commercial_first_outreach_template`.
+14. ~~Module D `format_property_list_inline` produces "South Lyon in MI" for city-only property addresses~~ — **Fixed:** Falls back to `canonical_name` when `property_address` has fewer than 3 comma parts (i.e., no street address). Only uses "street in city" format for full addresses like "826 N Main St, Adrian, MI".
+15. ~~Separate Pub/Sub pushes for same person create duplicate flows~~ — **Fixed:** Webhook now stages leads to `staged_leads` table and schedules a delayed `process_staged_leads` job (30s batch window). All notifications arriving within the window are collected into a single `lead_intake` flow per person.
 
 **Remaining:**
 - **Lead parsing is regex-based.** If a notification source changes their email format, the parser may fail. Downgrade-to-Unlabeled makes format changes visible (emails pile up in Unlabeled). Monitor `downgraded_to_unlabeled: true` in webhook output.
@@ -601,4 +608,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 23, 2026 — Module C fuzzy property dedup for Crexi name variants ("Name" vs "Name in City").*
+*Last updated: February 23, 2026 — Module C fuzzy property dedup, Module D canonical_name fallback for city-only addresses, webhook 30s batch window.*
