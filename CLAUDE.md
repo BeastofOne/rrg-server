@@ -132,7 +132,7 @@ Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubs
 
 ### Gmail Integration (Split Inbox)
 Two Gmail accounts with Pub/Sub push delivery (~2-5 seconds):
-- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub)
+- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect)
 - **teamgotcher@gmail.com** — sends drafts, receives replies
 
 OAuth resources:
@@ -142,7 +142,7 @@ OAuth resources:
 Delivery: Pub/Sub push subscription → `f/switchboard/gmail_pubsub_webhook` via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`)
 
 Webhook: `f/switchboard/gmail_pubsub_webhook` — detects account from `emailAddress` in push notification
-  - **leads@ INBOX:** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
+  - **leads@ INBOX:** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect/Unlabeled), parses lead notifications via source-specific parsers (Crexi bare-line format, Social Connect label/value format) or generic label-based parser, triggers `f/switchboard/lead_intake`
   - **teamgotcher@ SENT:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume. Searches both `lead_intake` and `lead_conversation` signals.
   - **teamgotcher@ INBOX (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals to detect replies to our outreach. If match found, applies "Lead Reply" label and triggers `f/switchboard/lead_conversation`
 

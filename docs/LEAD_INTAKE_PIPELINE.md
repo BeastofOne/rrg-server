@@ -3,7 +3,7 @@
 > **Flow path:** `f/switchboard/lead_intake`
 > **Last verified:** February 19, 2026
 
-The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, and the Seller Hub. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
+The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, and Social Connect. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
 ---
 
@@ -33,7 +33,7 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBu
 The pipeline is triggered automatically by `f/switchboard/gmail_pubsub_webhook`. This webhook handles Gmail Pub/Sub push notifications from **two accounts** — each with its own OAuth resource and history cursor.
 
 **Split inbox architecture:**
-- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub)
+- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect)
 - **teamgotcher@gmail.com** — sends drafts, receives replies to outreach
 
 Pub/Sub push notifications arrive within ~2-5 seconds via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`).
@@ -52,17 +52,18 @@ Gmail Pub/Sub notification → Windmill webhook
          │
     Categorize by pattern matching:
     ┌─────────────────────────────────────────────────────────┐
-    │ notifications.crexi.com          → label "Crexi"        │
-    │ loopnet.com + "favorited"        → label "LoopNet"      │
-    │ bizbuysell.com                   → label "BizBuySell"   │
-    │ subject: "New realtor.com lead…" → label "Realtor.com"  │
-    │ subject: "New Verified Seller…"  → label "Seller Hub"   │
-    │ everything else                  → label "Unlabeled"    │
+    │ notifications.crexi.com          → label "Crexi"          │
+    │ loopnet.com + "favorited"        → label "LoopNet"        │
+    │ bizbuysell.com                   → label "BizBuySell"     │
+    │ subject: "New realtor.com lead…" → label "Realtor.com"    │
+    │ subject: "New Verified Seller…"  → label "Seller Hub"     │
+    │ subject: "…Social Connect…"      → label "Social Connect" │
+    │ everything else                  → label "Unlabeled"      │
     └─────────────────────────────────────────────────────────┘
          │
     Apply Gmail label to message
          │
-    Is it a lead source? (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub)
+    Is it a lead source? (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect)
     ┌────┴────┐
     │  yes    │──── no ─── Is it a reply to outreach?
     └────┬────┘            (thread_id matches acted signal)
@@ -98,13 +99,20 @@ Gmail Pub/Sub notification → Windmill webhook
 
 | Source | Sender Match | Subject Match | Gmail Label | Lead Parse |
 |--------|-------------|---------------|-------------|------------|
-| Crexi | `notifications.crexi.com` | — | "Crexi" | Yes (source_type from body: om/flyer/info_request) |
-| LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes |
-| BizBuySell | `bizbuysell.com` | — | "BizBuySell" | Yes (source_type: bizbuysell, property from subject) |
-| Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes |
-| Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes |
+| Crexi | `notifications.crexi.com` | — | "Crexi" | Yes — dedicated parser (bare-line format: name from subject, email/phone on standalone lines) |
+| LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes — generic parser (name from subject only, rarely has email/phone) |
+| BizBuySell | `bizbuysell.com` | — | "BizBuySell" | Yes — generic parser (labeled: `Contact Name:`, `Contact Email:`, `Contact Phone:`) |
+| Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes — generic parser (labeled: `First Name:`, `Email Address:`, `Phone Number:`) |
+| Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes — generic parser (labeled: `Seller Name:`, `Email:`, `Phone Number:`) |
+| Social Connect | — | Contains "Social Connect" | "Social Connect" | Yes — dedicated parser (label/value pairs on alternating lines: `Name\n[value]\nEmail\n[value]`) |
 | Reply to outreach | — | — (thread_id matches acted signal) | "Lead Reply" | No (triggers `lead_conversation`) |
 | Everything else | — | — | "Unlabeled" | No |
+
+**Parser architecture:**
+- **Dedicated parsers** (`parse_crexi_lead`, `parse_social_connect_lead`): Handle non-standard formats that don't use label prefixes
+- **Generic parser** (`parse_lead_from_notification` → `parse_email_field`/`parse_name_field`/`parse_phone_field`): Handles labeled formats (`Key: Value`) with subject-line name fallback and bare-line phone fallback
+- **Email exclusion**: Filters out system/notification sender domains (crexi.com, loopnet.com, etc.) and specific addresses (support@crexi.com, teamgotcher@gmail.com). gmail.com is NOT excluded — most Crexi leads use personal Gmail
+- **Crexi source types**: `crexi_om`, `crexi_ca`, `crexi_info_request`, `crexi_brochure`, `crexi_floorplan`, `crexi_flyer`
 
 **Lead parser output** (per lead, passed to `lead_intake` flow):
 ```json
