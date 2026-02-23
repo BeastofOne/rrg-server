@@ -130,17 +130,28 @@ Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubs
 - `s/switchboard/act_signal` — Approve/process
 - `s/switchboard/get_pending_draft_signals` — Check draft signals
 
-### Gmail Integration
-- OAuth: `f/switchboard/gmail_oauth` (teamgotcher@gmail.com, GCP project `rrg-gmail-automation`)
-- Polling: `f/switchboard/gmail_polling_trigger` — runs every 1 minute, checks historyId for changes, dispatches webhook async
-- Webhook: `f/switchboard/gmail_pubsub_webhook` — handles SENT, INBOX, and reply detection
-  - **SENT path:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume. Searches both `lead_intake` and `lead_conversation` signals.
-  - **INBOX path (lead notifications):** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
-  - **INBOX path (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals to detect replies to our outreach. If match found, applies "Lead Reply" label and triggers `f/switchboard/lead_conversation`
-- Watch: `f/switchboard/setup_gmail_watch` — watches SENT + INBOX labels, renews every 6 days
-- Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h
-- GCP: topic `gmail-sent-notifications` in project `rrg-gmail-automation` (TeamGotcher)
-- Note: Pub/Sub push can't reach Windmill (behind Tailscale), so polling replaces push delivery
+### Gmail Integration (Split Inbox)
+Two Gmail accounts with Pub/Sub push delivery (~2-5 seconds):
+- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub)
+- **teamgotcher@gmail.com** — sends drafts, receives replies
+
+OAuth resources:
+- `f/switchboard/gmail_oauth` — teamgotcher@ (drafts, SENT detection, reply detection)
+- `f/switchboard/gmail_leads_oauth` — leads@ (INBOX notification processing)
+
+Delivery: Pub/Sub push subscription → `f/switchboard/gmail_pubsub_webhook` via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`)
+
+Webhook: `f/switchboard/gmail_pubsub_webhook` — detects account from `emailAddress` in push notification
+  - **leads@ INBOX:** Categorizes incoming emails, applies Gmail labels (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Unlabeled), parses lead notifications, triggers `f/switchboard/lead_intake`
+  - **teamgotcher@ SENT:** Matches sent emails to signals by thread_id (JSONB query on `draft_id_map`), triggers Module F resume. Searches both `lead_intake` and `lead_conversation` signals.
+  - **teamgotcher@ INBOX (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals to detect replies to our outreach. If match found, applies "Lead Reply" label and triggers `f/switchboard/lead_conversation`
+
+Watches (Gmail API → Pub/Sub topic):
+- `f/switchboard/setup_gmail_watch` — teamgotcher@ SENT + INBOX, renews every 6 days
+- `f/switchboard/setup_gmail_leads_watch` — leads@ INBOX only, renews every 6 days
+
+Health: `f/switchboard/check_gmail_watch_health` — daily 10 AM ET, SMS alert if webhook stale >48h
+GCP: topic `gmail-sent-notifications` in project `rrg-gmail-automation` (TeamGotcher)
 
 ### Message Router (`f/switchboard/message_router`)
 - Routes to rrg-pnl (port 8100) or rrg-brochure (port 8101)
@@ -155,6 +166,7 @@ Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubs
 |----------|---------|
 | `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed, includes client_id/secret for refresh) |
 | `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com (GCP: rrg-gmail-automation) |
+| `f/switchboard/gmail_leads_oauth` | Gmail OAuth for leads@resourcerealtygroupmi.com (same GCP project) |
 | `f/switchboard/pg` | Postgres connection (jake_signals table) |
 | `f/switchboard/tailscale_machines` | Network configs + SSH passwords |
 
@@ -162,7 +174,8 @@ Processes replies to CRE outreach (Crexi/LoopNet only). Triggered by `gmail_pubs
 | Variable | Purpose |
 |----------|---------|
 | `f/switchboard/property_mapping` | Property alias-to-deal mapping (JSON, 21 properties). Includes Crexi/LoopNet/BizBuySell aliases. Supports optional `documents` field per property for file paths. |
-| `f/switchboard/gmail_last_history_id` | Last processed Gmail history ID for webhook |
+| `f/switchboard/gmail_last_history_id` | Last processed Gmail history ID for teamgotcher@ |
+| `f/switchboard/gmail_leads_last_history_id` | Last processed Gmail history ID for leads@ |
 | `f/switchboard/sms_gateway_url` | Pixel 9a SMS gateway endpoint |
 | `f/switchboard/claude_endpoint_url` | Claude API proxy on jake-macbook (port 8787) |
 | `f/switchboard/router_token` | Windmill API token (secret) |

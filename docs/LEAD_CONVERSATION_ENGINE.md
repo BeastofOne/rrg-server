@@ -248,7 +248,7 @@ Identical to lead intake. After Module C suspends:
 
 | Trigger | Mechanism | Speed | Result |
 |---------|-----------|-------|--------|
-| Jake sends draft | Polling trigger → webhook → thread_id match → resume | ~1 minute | Module D runs (CRM + SMS) |
+| Jake sends draft | Pub/Sub push → webhook → thread_id match → resume | ~2-5 seconds | Module D runs (CRM + SMS) |
 | Jake deletes draft | Apps Script daily poll → resume with `draft_deleted` | Up to 24h | Module D runs (rejection note) |
 
 The SENT path in `gmail_pubsub_webhook` now searches for pending signals from both `lead_intake` and `lead_conversation` (`source_flow IN ('lead_intake', 'lead_conversation')`).
@@ -282,4 +282,4 @@ From the original plan, these remain:
 
 ---
 
-*Last updated: February 20, 2026 — Initial creation, documenting the full lead conversation engine flow*
+*Last updated: February 23, 2026 — Updated resume latency from ~1 minute (polling) to ~2-5 seconds (Pub/Sub push)*

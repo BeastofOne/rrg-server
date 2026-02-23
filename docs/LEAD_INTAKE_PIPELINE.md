@@ -21,7 +21,7 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBu
 - [Resume Mechanism](#resume-mechanism)
   - [How Windmill Suspend/Resume Works](#how-windmill-suspendresume-works)
   - [Thread ID Matching (Sent Detection)](#thread-id-matching-sent-detection)
-  - [Polling Trigger](#polling-trigger)
+  - [Pub/Sub Push Delivery](#pubsub-push-delivery)
   - [Apps Script Fallback (Deletion Detection)](#apps-script-fallback-deletion-detection)
 - [Windmill Resources and Variables](#windmill-resources-and-variables)
 - [Known Issues](#known-issues)
@@ -30,10 +30,16 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBu
 
 ## Trigger: Gmail Pub/Sub Webhook
 
-The pipeline is triggered automatically by `f/switchboard/gmail_pubsub_webhook`. This webhook handles **all** Gmail Pub/Sub notifications (both SENT and INBOX) in a single script with a single history cursor.
+The pipeline is triggered automatically by `f/switchboard/gmail_pubsub_webhook`. This webhook handles Gmail Pub/Sub push notifications from **two accounts** — each with its own OAuth resource and history cursor.
+
+**Split inbox architecture:**
+- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub)
+- **teamgotcher@gmail.com** — sends drafts, receives replies to outreach
+
+Pub/Sub push notifications arrive within ~2-5 seconds via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`).
 
 ```
-New email arrives in teamgotcher@gmail.com INBOX
+New lead notification arrives in leads@resourcerealtygroupmi.com INBOX
          │
 Gmail Pub/Sub notification → Windmill webhook
          │
@@ -303,7 +309,7 @@ Otherwise, writes a signal to the `jake_signals` Postgres table, then **suspends
 This map is how external systems (Pub/Sub webhook, Apps Script) find the matching signal for a given draft.
 
 After writing the signal, the module returns and the flow **suspends**. Two external systems watch for Jake's action on the draft:
-- **Sent:** Polling trigger → `f/switchboard/gmail_pubsub_webhook` → thread_id match → resumes the flow in ~1 minute
+- **Sent:** Pub/Sub push → `f/switchboard/gmail_pubsub_webhook` → thread_id match → resumes the flow in ~2-5 seconds
 - **Deleted:** `gmail-draft-deletion-watcher` (Google Apps Script, daily 9 AM) POSTs to `resume_url` with `action: "draft_deleted"` so Module F can write CRM rejection notes
 
 See [Resume Mechanism](#resume-mechanism) for full details.
@@ -344,7 +350,7 @@ After Module E suspends, the flow is frozen. Three things can wake it up:
 
 | Trigger | Mechanism | Speed | What happens |
 |---------|-----------|-------|-------------|
-| Jake sends a draft | Polling trigger → webhook → thread_id match → POST to `resume_url` | ~1 minute | Module F runs (CRM update + SMS) |
+| Jake sends a draft | Pub/Sub push → webhook → thread_id match → POST to `resume_url` | ~2-5 seconds | Module F runs (CRM update + SMS) |
 | Jake deletes a draft | `gmail-draft-deletion-watcher` (Apps Script daily poll) → POST to `resume_url` with `action: "draft_deleted"` | Up to 24 hours | Module F runs (CRM rejection note) |
 | Nothing happens | — | — | Flow stays suspended (1 year timeout) — visible reminder in Windmill |
 
@@ -420,32 +426,40 @@ gmail_pubsub_webhook runs:
 
 **Gmail History ID explained:** Every change in a Gmail mailbox increments a counter. When the webhook runs, it asks Gmail "what happened between my last checkpoint and now?" This range query handles batched changes (e.g., 3 emails sent quickly may produce only 1 notification).
 
-### Polling Trigger
+### Pub/Sub Push Delivery
 
-Google Pub/Sub push cannot reach Windmill because rrg-server is behind Tailscale (no public push endpoint). Instead, a **polling trigger** checks Gmail every minute.
+Gmail Pub/Sub push notifications are delivered directly to the webhook via Tailscale Funnel. Windmill is publicly reachable at `https://rrg-server.tailc01f9b.ts.net:8443`, so push subscriptions work without polling.
 
-**Script:** `f/switchboard/gmail_polling_trigger`
-**Schedule:** `0 */1 * * * *` (every 1 minute, Windmill 6-field cron)
+**GCP Configuration:**
+- Topic: `projects/rrg-gmail-automation/topics/gmail-sent-notifications`
+- Push subscription → `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/<token>/p/f/switchboard/gmail_pubsub_webhook`
+- Both accounts (teamgotcher@ and leads@) publish to the same topic
+- The webhook distinguishes accounts via the `emailAddress` field in the push notification
 
 ```
-Every 1 minute:
+Gmail change detected (either account)
          │
-    Get Gmail profile → current historyId
+    Gmail Watch → Pub/Sub topic → push subscription
          │
-    Compare to f/switchboard/gmail_last_history_id
+    POST to Windmill webhook (~2-5 seconds)
          │
-    ┌────┴────┐
-    │ Same?   │──── yes → return { skipped: true }
-    └────┬────┘
-         │ no (changes detected)
-         ▼
-    Build simulated Pub/Sub message (same format as real push)
-    Call wmill.run_script_async("f/switchboard/gmail_pubsub_webhook")
-         │
-    return { triggered: true, webhook_job_id: ... }
+    Webhook decodes emailAddress:
+    ┌────┴────────────────────────────┐
+    │ leads@?                         │
+    │  → Use gmail_leads_oauth        │
+    │  → Use gmail_leads_last_history │
+    │  → Process INBOX leads only     │
+    │                                 │
+    │ teamgotcher@?                   │
+    │  → Use gmail_oauth              │
+    │  → Use gmail_last_history_id    │
+    │  → Process SENT + reply detect  │
+    └─────────────────────────────────┘
 ```
 
-**Why `run_script_async`?** Using synchronous `run_script` would deadlock — the polling trigger holds a worker slot while waiting for the webhook, but the webhook needs a free worker slot to run. Async dispatch avoids this.
+**Latency:** ~2-5 seconds from Gmail change to webhook execution (vs ~1 minute with the old polling trigger).
+
+**Fallback:** The deprecated polling trigger (`f/switchboard/gmail_polling_trigger`) is kept but its schedule is disabled. It can be re-enabled in an emergency, but only polls teamgotcher@ — not leads@.
 
 ### Apps Script Fallback (Deletion Detection)
 
@@ -494,7 +508,8 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 | Resource | Purpose |
 |----------|---------|
 | `f/switchboard/wiseagent_oauth` | WiseAgent OAuth tokens (auto-refreshed by Module A, F, and NDA handler) |
-| `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com |
+| `f/switchboard/gmail_oauth` | Gmail OAuth for teamgotcher@gmail.com (drafts, SENT, replies) |
+| `f/switchboard/gmail_leads_oauth` | Gmail OAuth for leads@resourcerealtygroupmi.com (INBOX notifications) |
 | `f/switchboard/pg` | Postgres connection (jake_signals table) |
 
 **Variables (simple key-value):**
@@ -503,7 +518,8 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 |----------|---------|
 | `f/switchboard/property_mapping` | JSON mapping of property aliases → canonical names with metadata |
 | `f/switchboard/sms_gateway_url` | SMS gateway endpoint URL (pixel-9a, Crexi/LoopNet leads only) |
-| `f/switchboard/gmail_last_history_id` | Gmail History API cursor — last processed history ID |
+| `f/switchboard/gmail_last_history_id` | Gmail History API cursor for teamgotcher@ |
+| `f/switchboard/gmail_leads_last_history_id` | Gmail History API cursor for leads@ |
 | `f/switchboard/router_token` | Auth token used by gmail_pubsub_webhook for resume URL POSTs |
 | `f/switchboard/claude_endpoint_url` | Claude API proxy URL on jake-macbook (`http://100.108.74.112:8787`) |
 
@@ -512,10 +528,11 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 | Script | Purpose |
 |--------|---------|
 | `get_pending_draft_signals` | Query pending lead_intake signals with draft_id_map (used by Apps Script) |
-| `gmail_pubsub_webhook` | Processes Gmail changes — SENT: thread_id match → triggers resume; INBOX: categorizes, labels, triggers lead intake; reply detection → triggers lead_conversation |
-| `gmail_polling_trigger` | Polls Gmail every 1 min, dispatches webhook async if history changed (replaces Pub/Sub push) |
-| `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch, renew every 6 days |
-| `check_gmail_watch_health` | Daily 10 AM ET — alerts via SMS if webhook hasn't run in 48h |
+| `gmail_pubsub_webhook` | Processes Gmail Pub/Sub push notifications — split inbox: leads@ for notifications, teamgotcher@ for SENT/replies |
+| `gmail_polling_trigger` | DEPRECATED — kept as emergency fallback, schedule disabled |
+| `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch on teamgotcher@, renew every 6 days |
+| `setup_gmail_leads_watch` | Sets up Gmail INBOX label watch on leads@, renew every 6 days |
+| `check_gmail_watch_health` | Daily 10 AM ET — alerts via SMS if webhook hasn't run in 48h (covers both accounts) |
 | `act_signal` | Marks signal as acted in Postgres (does NOT resume/cancel suspended flows) |
 | `read_signals` | Query pending signals |
 | `write_signal` | Insert new signal row |
@@ -533,7 +550,7 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 6. ~~Pub/Sub webhook `lead_data` ignored~~ — **Fixed:** Removed dead-weight `lead_data` from resume payload.
 7. ~~Lead parsing fails silently~~ — **Mitigated:** `validate_lead()` cross-checks fields. Failed/invalid parses downgrade to "Unlabeled" label. New contact creations logged to `contact_creation_log` table for retroactive batch-fix.
 8. ~~Gmail strips custom X-headers when drafts are sent~~ — **Fixed:** Removed all `X-Lead-Intake-*` headers from Module D. SENT matching now uses thread_id (stable across draft→sent) via JSONB query on `jake_signals.detail.draft_id_map`.
-9. ~~Pub/Sub push can't reach Windmill behind Tailscale~~ — **Fixed:** Added polling trigger (`f/switchboard/gmail_polling_trigger`) that runs every 1 minute and dispatches webhook async. ~1 minute latency instead of ~2 seconds, but reliable.
+9. ~~Pub/Sub push can't reach Windmill behind Tailscale~~ — **Fixed:** Tailscale Funnel exposes Windmill publicly at `https://rrg-server.tailc01f9b.ts.net:8443`. Pub/Sub push subscription delivers notifications directly in ~2-5 seconds. Polling trigger deprecated.
 10. ~~Zombie flows when no drafts exist~~ — **Fixed:** Added `stop_after_if: result.skipped == true` on Module E. Flows with no drafts (no email, info requests only) terminate cleanly instead of suspending forever.
 
 **Resolved (Feb 19, 2026):**
@@ -553,14 +570,15 @@ The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth cl
 **Project:** `rrg-gmail-automation` (TeamGotcher Google account)
 **Topic:** `gmail-sent-notifications`
 
-**Note:** Pub/Sub push subscriptions cannot reach Windmill (behind Tailscale). The polling trigger (`f/switchboard/gmail_polling_trigger`) replaces push delivery. The Pub/Sub topic and Gmail watch are still required for the Gmail History API to work — the watch tells Gmail to track changes, even though we poll for them instead of receiving pushes.
+Pub/Sub push subscriptions deliver notifications directly to the webhook via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`).
 
 **If setting up from scratch (GCP Console):**
 1. Go to Pub/Sub → Topics → Create Topic: `gmail-sent-notifications`
 2. On the topic, add IAM binding: `gmail-api-push@system.gserviceaccount.com` → role `Pub/Sub Publisher`
-3. (Push subscription is optional — polling trigger handles delivery)
-4. Run `f/switchboard/setup_gmail_watch` to activate the watch
-5. Create schedule `f/switchboard/gmail_polling_schedule` — cron `0 */1 * * * *` — targeting `f/switchboard/gmail_polling_trigger`
+3. Create push subscription → `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/<token>/p/f/switchboard/gmail_pubsub_webhook`
+4. Run `f/switchboard/setup_gmail_watch` to activate the teamgotcher@ watch
+5. Run `f/switchboard/setup_gmail_leads_watch` to activate the leads@ watch
+6. Both watches publish to the same topic; the webhook distinguishes accounts via `emailAddress`
 
 ---
 
@@ -570,4 +588,4 @@ The Gmail watch requires a Pub/Sub topic in the same GCP project as the OAuth cl
 
 ---
 
-*Last updated: February 20, 2026 — Added BizBuySell as lead source (categorization, parsing, commercial templates, property mapping aliases). Added reply detection (unlabeled emails → thread_id match → lead_conversation), updated SENT path SQL to match both lead_intake and lead_conversation signals, added claude_endpoint_url variable*
+*Last updated: February 23, 2026 — Split inbox architecture: leads@ for notifications, teamgotcher@ for drafts/replies. Switched from polling trigger to Pub/Sub push delivery (~2-5 sec). Dual OAuth, dual history cursors. Polling trigger deprecated.*

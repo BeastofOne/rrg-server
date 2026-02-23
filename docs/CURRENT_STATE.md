@@ -225,27 +225,39 @@ Known scripts (all `f/switchboard/` despite being scripts, not flows):
 - `f/switchboard/read_signals` — Read pending signals
 - `f/switchboard/act_signal` — Mark signal as acted in Postgres (does not resume/cancel suspended flows)
 - `f/switchboard/get_pending_draft_signals` — Query pending lead_intake signals with draft_id_map
-- `f/switchboard/gmail_pubsub_webhook` — Gmail change handler — SENT: thread_id match → resume; INBOX: categorize, label, trigger lead intake; reply detection → trigger lead_conversation
-- `f/switchboard/gmail_polling_trigger` — Polls Gmail every 1 min, dispatches webhook async if changes detected (replaces Pub/Sub push)
-- `f/switchboard/setup_gmail_watch` — Gmail SENT + INBOX label watch setup (renew every 6 days)
+- `f/switchboard/gmail_pubsub_webhook` — Gmail Pub/Sub push handler — split inbox: leads@ for notifications, teamgotcher@ for SENT/replies
+- `f/switchboard/gmail_polling_trigger` — DEPRECATED: kept as emergency fallback, schedule disabled
+- `f/switchboard/setup_gmail_watch` — Gmail SENT + INBOX label watch for teamgotcher@ (renew every 6 days)
+- `f/switchboard/setup_gmail_leads_watch` — Gmail INBOX label watch for leads@ (renew every 6 days)
 - `f/docuseal/nda_completed` — DocuSeal NDA completion webhook handler (uses `f/switchboard/wiseagent_oauth`)
 - `f/switchboard/check_gmail_watch_health` — Daily health check: alerts via SMS if webhook hasn't run in 48h
 
 Windmill schedules:
-- `f/switchboard/gmail_polling_schedule` — cron `0 */1 * * * *` (every 1 min) → `f/switchboard/gmail_polling_trigger`
+- `f/switchboard/gmail_polling_schedule` — DISABLED (was: every 1 min polling trigger, replaced by Pub/Sub push)
+- `f/switchboard/schedule_gmail_watch_renewal` — cron `0 0 9 */6 * *` → `f/switchboard/setup_gmail_watch` (teamgotcher@)
+- `f/switchboard/schedule_gmail_leads_watch_renewal` — cron `0 0 9 */6 * *` → `f/switchboard/setup_gmail_leads_watch` (leads@)
+- `f/switchboard/gmail_watch_health_daily` — cron `0 0 10 * * *` → `f/switchboard/check_gmail_watch_health`
 
 Windmill variables:
 - `f/switchboard/property_mapping` — JSON property alias → canonical name mapping (with optional `documents` field per property)
 - `f/switchboard/sms_gateway_url` — SMS gateway endpoint URL (Pixel 9a)
-- `f/switchboard/gmail_last_history_id` — Gmail History API cursor (last processed history ID)
+- `f/switchboard/gmail_last_history_id` — Gmail History API cursor for teamgotcher@
+- `f/switchboard/gmail_leads_last_history_id` — Gmail History API cursor for leads@
 - `f/switchboard/router_token` — Auth token for resume URL POSTs
 - `f/switchboard/claude_endpoint_url` — Claude API proxy on jake-macbook (`http://100.108.74.112:8787`)
 
 ---
 
-## GMAIL INTEGRATION
+## GMAIL INTEGRATION (Split Inbox)
 
-**Purpose:** Detect when lead intake/conversation drafts are sent (~1 minute), categorize incoming emails, and detect replies to outreach.
+**Purpose:** Detect when lead intake/conversation drafts are sent (~2-5 seconds), categorize incoming lead notifications, and detect replies to outreach.
+
+### Split Inbox Architecture
+
+| Account | Purpose | OAuth Resource | History Variable |
+|---------|---------|----------------|-----------------|
+| `leads@resourcerealtygroupmi.com` | Receives lead notifications | `f/switchboard/gmail_leads_oauth` | `f/switchboard/gmail_leads_last_history_id` |
+| `teamgotcher@gmail.com` | Sends drafts, receives replies | `f/switchboard/gmail_oauth` | `f/switchboard/gmail_last_history_id` |
 
 ### GCP Configuration
 
@@ -253,20 +265,21 @@ Windmill variables:
 |---------|-------|
 | GCP Project | `rrg-gmail-automation` |
 | Pub/Sub Topic | `projects/rrg-gmail-automation/topics/gmail-sent-notifications` |
-| Gmail Account | `teamgotcher@gmail.com` |
-| Labels Watched | `SENT`, `INBOX` |
-| Watch Expiry | ~7 days (renewed every 6 by `setup_gmail_watch`) |
-| Delivery | Polling trigger every 1 minute (Pub/Sub push can't reach Tailscale) |
+| Push Subscription | → `https://rrg-server.tailc01f9b.ts.net:8443/api/w/rrg/webhooks/.../p/f/switchboard/gmail_pubsub_webhook` |
+| Accounts | `teamgotcher@gmail.com` (SENT+INBOX), `leads@resourcerealtygroupmi.com` (INBOX) |
+| Watch Expiry | ~7 days (renewed every 6 by `setup_gmail_watch` and `setup_gmail_leads_watch`) |
+| Delivery | Pub/Sub push via Tailscale Funnel (~2-5 seconds) |
 
 ### How It Works
 
-1. `setup_gmail_watch` tells Gmail to track changes on SENT + INBOX labels
-2. `gmail_polling_trigger` runs every 1 minute — checks if Gmail's `historyId` has changed
-3. If changed: dispatches `gmail_pubsub_webhook` asynchronously (`wmill.run_script_async`)
-4. Webhook queries Gmail History API for changes since last cursor
-5. **SENT messages:** Fetches `threadId`, searches `jake_signals` for matching thread_id via JSONB query (both `lead_intake` and `lead_conversation` signals), POSTs to `resume_url` to wake post-approval module
-6. **INBOX messages (lead notifications):** Categorizes by sender/subject, applies Gmail labels, parses leads, triggers `lead_intake` flow
-7. **INBOX messages (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals to detect replies to outreach. If match found, applies "Lead Reply" label and triggers `lead_conversation` flow
+1. `setup_gmail_watch` tells Gmail to track teamgotcher@ changes on SENT + INBOX labels
+2. `setup_gmail_leads_watch` tells Gmail to track leads@ changes on INBOX label
+3. Both watches publish to the same Pub/Sub topic
+4. Push subscription delivers notifications directly to `gmail_pubsub_webhook` (~2-5 seconds)
+5. Webhook detects account from `emailAddress` in the push notification, uses correct OAuth + history cursor
+6. **leads@ INBOX:** Categorizes by sender/subject, applies Gmail labels, parses leads, triggers `lead_intake` flow
+7. **teamgotcher@ SENT:** Fetches `threadId`, searches `jake_signals` for matching thread_id via JSONB query, POSTs to `resume_url` to wake post-approval module
+8. **teamgotcher@ INBOX (reply detection):** For "Unlabeled" emails, checks thread_id against acted signals. If match found, applies "Lead Reply" label and triggers `lead_conversation` flow
 
 **Key design choice:** Gmail strips all custom `X-` headers when drafts are sent. Sent emails are matched to signals by **thread_id** (stable across draft→sent transitions), not headers.
 
@@ -288,7 +301,7 @@ Windmill variables:
 1. Calls `f/switchboard/get_pending_draft_signals` to get all pending signals with `draft_id_map`
 2. For each draft ID: tries `Gmail.Users.Drafts.get()` — if the draft still exists, skips it
 3. If draft not found: checks the thread for SENT messages
-4. If SENT message found: POSTs to `resume_url` with `action: "email_sent"` (fallback for polling miss)
+4. If SENT message found: POSTs to `resume_url` with `action: "email_sent"` (fallback for Pub/Sub miss)
 5. If no SENT message: POSTs to `resume_url` with `action: "draft_deleted"` (Module F runs, writes CRM rejection note)
 
 Also exposes a web app for remote triggering (`?action=run`, `?action=setup`, `?action=status`).
@@ -344,5 +357,5 @@ Docker volumes (some may be orphaned):
 
 ---
 
-*Last verified: February 20, 2026*
+*Last verified: February 23, 2026*
 *Source: Direct SSH inspection + dataflow analysis*
