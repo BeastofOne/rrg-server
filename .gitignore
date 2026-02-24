@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+
+# Credentials / secrets
+.dotloop-pw
+.mcp.json
+
+# Nix build outputs
+result
+
+# PDFs (generated artifacts)
+*.pdf
+
+# Compiled app bundles
+*.app/
+
+# Build outputs
+dist/
+
+# Independent child projects (separate repos)
+rrg-brochure/
+rrg-pnl/

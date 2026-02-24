@@ -1,0 +1,20 @@
+{
+  "name": "gmail-mcp",
+  "version": "1.0.0",
+  "description": "Gmail MCP server for sending emails via Claude",
+  "main": "index.js",
+  "bin": {
+    "gmail-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["mcp", "gmail", "email"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "googleapis": "^170.1.0"
+  }
+}

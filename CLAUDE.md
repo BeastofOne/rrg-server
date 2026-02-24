@@ -2,7 +2,7 @@
 
 ## Overview
 
-Jake's CRE business infrastructure. Five projects, one monorepo:
+Jake's CRE business infrastructure. Six projects, one monorepo:
 
 ```
 rrg-server/
@@ -11,6 +11,7 @@ rrg-server/
 ├── rrg-brochure/          # Property brochure generator (LangGraph + Flask, port 8101)
 ├── rrg-claude-endpoint/   # Claude API proxy (Node.js + pm2, port 8787)
 ├── rrg-email-assistant/   # Email automation (MCP tools, no server)
+├── windmill-mcp/          # Local Windmill MCP server (Node.js, replaces built-in endpoint)
 ├── docs/                  # Architecture diagrams, current state
 └── .claude/               # Rules, skills, hooks
 ```
@@ -91,6 +92,17 @@ rrg-server/
 | `email_templates.md` | Property-specific email templates (Parkwood, DQ, Mattawan, etc.) |
 | `gmail-mcp/` | Gmail MCP server (Node.js) |
 | `autofill-dotloop.py` | DEPRECATED — legacy browser automation |
+
+### windmill-mcp/ — Local Windmill MCP Server
+Replaces Windmill's built-in MCP endpoint (which returned 70K-400K+ tokens per call). Wraps the same REST API with pagination and field trimming.
+
+| File | What it does | Key exports |
+|------|-------------|-------------|
+| `src/index.ts` | MCP server — API client, 25 static tools, dynamic flow/script tools | All tools |
+| `package.json` | Dependencies: `@modelcontextprotocol/sdk` | — |
+| `tsconfig.json` | TypeScript config (ES2022, NodeNext) | — |
+
+Built with `npm run build`, runs as `node dist/index.js`. Configured in `~/.claude.json` user-level MCP.
 
 ### Shared Pattern: `claude_llm.py`
 Both rrg-pnl and rrg-brochure use identical `ChatClaudeCLI` class:
