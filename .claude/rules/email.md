@@ -13,5 +13,5 @@
 
 ## Jake's Signature
 - Phone: (734) 896-0518
-- Email: jake.phillips@resourcerealty.com
+- Email: jacob@resourcerealtygroupmi.com
 - Sign-off: "All The Best, Jake"
