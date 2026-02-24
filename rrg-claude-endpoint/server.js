@@ -61,8 +61,11 @@ http.createServer((req, res) => {
         timeout: 120000, // 2 minute timeout
         env: {
           ...process.env,
-          // Ensure no API key is set to use Max subscription
-          ANTHROPIC_API_KEY: ''
+          // Use OAuth token (same account as rrg-router), clear API key to prevent conflicts
+          ANTHROPIC_API_KEY: '',
+          CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN || '',
+          // Prevent "nested session" error if pm2 was started from inside Claude Code
+          CLAUDECODE: ''
         }
       }, (err, stdout, stderr) => {
         // Clean up temp file

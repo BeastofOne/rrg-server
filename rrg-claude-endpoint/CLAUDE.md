@@ -3,7 +3,7 @@
 ## What
 HTTP API proxy that accepts prompts and pipes them to `claude -p` CLI. Runs on jake-macbook via pm2 (port 8787), accessible over Tailscale at `http://100.108.74.112:8787`.
 
-Windmill flows on rrg-server call this to get LLM responses without their own Claude credentials — it uses Jake's Claude Max subscription via the CLI.
+Windmill flows on rrg-server call this to get LLM responses without their own Claude credentials — it uses an OAuth token (shared with rrg-router/pnl/brochure) passed to the CLI.
 
 ## Request/Response
 
@@ -48,7 +48,7 @@ Only `haiku`, `sonnet`, `opus` are accepted. Any other value falls back to `haik
 
 Key details:
 - `--allowedTools ""` = no tools, pure reasoning (no file access, no web)
-- `ANTHROPIC_API_KEY` explicitly unset so CLI uses Max subscription
+- `ANTHROPIC_API_KEY` explicitly unset, `CLAUDE_CODE_OAUTH_TOKEN` passed through so CLI uses OAuth
 - 10MB output buffer, 2-minute timeout
 - CORS enabled (all origins)
 
@@ -57,6 +57,7 @@ Key details:
 |----------|---------|------|
 | `PORT` | `8787` | Listen port |
 | `CLAUDE_PATH` | `$HOME/.npm-global/bin/claude` | Path to Claude CLI binary |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — | OAuth token for Claude CLI (shared with rrg-router) |
 
 ## Who Calls It
 - **Windmill flows** on rrg-server — lead intake, lead conversation, message routing, draft generation
