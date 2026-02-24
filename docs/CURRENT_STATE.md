@@ -29,13 +29,13 @@ This document reflects the **actual current state** of RRG-Server, verified by S
 |-----------|---------|
 | Local IP | 192.168.1.31 |
 | Tailscale IP | 100.97.86.99 |
-| WiFi | SpectrumSetup-E0 / ***REDACTED_WIFI_PASSWORD*** |
+| WiFi | SpectrumSetup-E0 |
 
 ### SSH Access
 
 ```
 ssh andrea@100.97.86.99
-Password: ***REDACTED***
+# Password in ~/.secrets/jake-system.json → rrg_server.ssh_password
 ```
 
 ### Installed System Software
@@ -85,7 +85,7 @@ Network: `windmill_default` (created by this stack)
 | windmill-db-1 | postgres:16-alpine | 395MB | 5432 (internal) | Windmill database |
 
 Windmill config:
-- `DATABASE_URL` — postgres://postgres:***REDACTED***@db/windmill
+- `DATABASE_URL` — postgres://postgres:<password>@db/windmill
 - `BASE_URL` — http://100.97.86.99:8000
 - Worker has Docker socket mounted for container-based jobs
 
@@ -101,7 +101,7 @@ Network: default (bridge)
 DocuSeal config:
 - `HOST` — rrg-server.tailc01f9b.ts.net
 - `FORCE_SSL` — true
-- `SECRET_KEY_BASE` — ***REDACTED_DOCUSEAL_KEY***
+- `SECRET_KEY_BASE` — set in DocuSeal compose .env on server
 - SMTP: teamgotcher@gmail.com via smtp.gmail.com:587
 - NDA Template ID: 1 (NCND-RRG)
 - Admin URL: https://rrg-server.tailc01f9b.ts.net/
@@ -350,7 +350,7 @@ Docker volumes (some may be orphaned):
 
 1. **Disk 94% full** — Needs cleanup of unused Docker images and orphaned volumes
 2. **No automated backups** — DocuSeal data and Windmill DB have no backup strategy
-3. **Default SSH password** — `andrea:***REDACTED***` should be changed
+3. **Default SSH password** — should be changed (see `~/.secrets/jake-system.json`)
 4. ~~**rrg-brochure is 4.91GB**~~ — Accepted; Chromium + claude-code are required, works as-is
 5. ~~**docuseal-source/ is empty**~~ — Deleted (was empty leftover)
 6. **No monitoring** — No health checks or alerts if services go down
