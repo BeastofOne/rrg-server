@@ -1,25 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+
 # Dependencies
 node_modules/
 
 # macOS
 .DS_Store
 
-# Credentials / secrets
-.dotloop-pw
-.mcp.json
+# Secrets
+.env
 
 # Nix build outputs
 result
 
-# PDFs (generated artifacts)
+# Generated artifacts
 *.pdf
-
-# Compiled app bundles
 *.app/
-
-# Build outputs
 dist/
 
-# Independent child projects (separate repos)
-rrg-brochure/
-rrg-pnl/
+# Editor temp files (vim/nano on rrg-server)
+*.swp
+*~
+.*.swp
+
+# Local Claude config
+.mcp.json
+CLAUDE.local.md
+
+# Sync logs
+rrg-sync.log
+
+# Credentials
+.dotloop-pw
