@@ -22,7 +22,7 @@ if [ -z "$SRC_CHANGED" ]; then
 fi
 
 # Find modified doc files
-DOC_CHANGED=$(git diff --name-only HEAD 2>/dev/null | grep -E '(CLAUDE\.md|ARCHITECTURE\.md|CURRENT_STATE\.md)' || true)
+DOC_CHANGED=$(git diff --name-only HEAD 2>/dev/null | grep -E '(CLAUDE\.md|ARCHITECTURE\.md|CURRENT_STATE\.md|DEPLOYMENT\.md)' || true)
 
 if [ -z "$DOC_CHANGED" ]; then
   echo "BLOCKED: Source files changed but no documentation updated."
