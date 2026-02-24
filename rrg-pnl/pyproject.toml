@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "rrg-pnl"
+version = "0.1.0"
+description = "RRG P&L Microservice — persistent Flask container with LangGraph workflow"
+authors = ["Jake Phillips"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+flask = ">=3.0"
+langgraph = ">=0.2"
+langchain-core = ">=0.3"
+weasyprint = ">=62"
+jinja2 = ">=3.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "rrg-router"
+version = "0.1.0"
+description = "Router node — Streamlit chat UI with intent classification"
+authors = ["Jake Phillips"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+streamlit = ">=1.31"
+langgraph = ">=0.2"
+langchain-core = ">=0.3"
+requests = ">=2.31"
+python-dotenv = ">=1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

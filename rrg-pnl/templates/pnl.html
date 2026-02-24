@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    @page {
+        size: letter;
+        margin: 0.75in 1in;
+    }
+
+    body {
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 10pt;
+        color: #333;
+        line-height: 1.4;
+    }
+
+    .header {
+        border-bottom: 2px solid #2c5f2d;
+        padding-bottom: 12px;
+        margin-bottom: 20px;
+    }
+
+    .header h1 {
+        font-size: 18pt;
+        color: #2c5f2d;
+        margin: 0 0 4px 0;
+    }
+
+    .header .subtitle {
+        font-size: 10pt;
+        color: #666;
+        margin: 0;
+    }
+
+    .header .meta {
+        font-size: 9pt;
+        color: #999;
+        margin-top: 8px;
+    }
+
+    h2 {
+        font-size: 11pt;
+        color: #2c5f2d;
+        margin: 20px 0 8px 0;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 4px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    td {
+        padding: 4px 0;
+        vertical-align: top;
+    }
+
+    td.label {
+        padding-left: 16px;
+    }
+
+    td.amount {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        width: 120px;
+    }
+
+    tr.subtotal td {
+        font-weight: bold;
+        border-top: 1px solid #ccc;
+        padding-top: 6px;
+    }
+
+    tr.total td {
+        font-weight: bold;
+        font-size: 11pt;
+        border-top: 2px solid #2c5f2d;
+        border-bottom: 2px solid #2c5f2d;
+        padding: 8px 0;
+    }
+
+    tr.vacancy td.amount {
+        color: #c0392b;
+    }
+
+    .footer {
+        margin-top: 40px;
+        padding-top: 12px;
+        border-top: 1px solid #ddd;
+        font-size: 8pt;
+        color: #999;
+        text-align: center;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Profit & Loss Statement</h1>
+    <p class="subtitle">{{ property_name }}</p>
+    {% if property_address %}
+    <p class="subtitle">{{ property_address }}</p>
+    {% endif %}
+    <p class="meta">{{ period_range }}</p>
+</div>
+
+<h2>Income</h2>
+<table>
+    {% for label, amount in income.items() %}
+    <tr>
+        <td class="label">{{ label }}</td>
+        <td class="amount">${{ "{:,.2f}".format(amount) }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="subtotal">
+        <td>Total Income</td>
+        <td class="amount">${{ "{:,.2f}".format(total_income) }}</td>
+    </tr>
+</table>
+
+<h2>Less: Vacancy</h2>
+<table>
+    <tr class="vacancy">
+        <td class="label">Vacancy & Credit Loss ({{ "{:.0%}".format(vacancy_rate) }})</td>
+        <td class="amount">(${{ "{:,.2f}".format(vacancy_loss) }})</td>
+    </tr>
+    <tr class="subtotal">
+        <td>Effective Gross Income</td>
+        <td class="amount">${{ "{:,.2f}".format(effective_gross_income) }}</td>
+    </tr>
+</table>
+
+<h2>Expenses</h2>
+<table>
+    {% for label, amount in expenses.items() %}
+    <tr>
+        <td class="label">{{ label }}</td>
+        <td class="amount">${{ "{:,.2f}".format(amount) }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="subtotal">
+        <td>Total Expenses</td>
+        <td class="amount">${{ "{:,.2f}".format(total_expenses) }}</td>
+    </tr>
+</table>
+
+<table>
+    <tr class="total">
+        <td>Net Income</td>
+        <td class="amount">${{ "{:,.2f}".format(net_income) }}</td>
+    </tr>
+</table>
+
+<div class="footer">
+    *Numbers are estimated based on information gathered from owner.
+</div>
+
+</body>
+</html>

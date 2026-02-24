@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&family=Quando&display=swap">
+<style>
+    /* ===== GLOBAL ===== */
+    @page {
+        size: letter landscape;
+        margin: 0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 12pt;
+        color: #333;
+        line-height: 1.4;
+    }
+
+    /* ===== COLOR PALETTE ===== */
+    :root {
+        --gold: #E7AF53;
+        --gold-dark: #C99A3E;
+        --navy: #353155;
+        --white: #FFFFFF;
+        --off-white: #F5F5F5;
+        --dark-text: #2E2E2E;
+    }
+
+    /* ===== PAGE STRUCTURE ===== */
+    .page {
+        width: 11in;
+        height: 8.5in;
+        position: relative;
+        overflow: hidden;
+        page-break-after: always;
+        background: url('static/bg-pattern.png') center/cover no-repeat;
+    }
+    .page::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.75);
+        z-index: 0;
+    }
+    .page:last-child {
+        page-break-after: avoid;
+    }
+
+    /* ===== SHARED ELEMENTS ===== */
+    .logo-watermark {
+        position: absolute;
+        bottom: 16pt;
+        right: 16pt;
+        width: 71pt;
+        height: 71pt;
+        border-radius: 50%;
+        overflow: hidden;
+        z-index: 10;
+    }
+    .logo-watermark img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    /* Gold banner for pages 4/5/6 — dark text on gold */
+    .gold-banner {
+        background: var(--gold);
+        color: var(--dark-text);
+        text-align: center;
+        height: 62pt;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32pt;
+        font-weight: bold;
+        font-family: Georgia, "Times New Roman", serif;
+        border-bottom: 2px solid var(--gold-dark);
+        position: relative;
+        z-index: 2;
+    }
+
+    .section-title {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 36pt;
+        font-weight: bold;
+        color: var(--dark-text);
+        margin-bottom: 28pt;
+        line-height: 1.15;
+    }
+
+    ul.highlights {
+        list-style: disc;
+        padding-left: 28pt;
+        font-size: 15pt;
+        line-height: 1.8;
+    }
+    ul.highlights li {
+        margin-bottom: 8pt;
+    }
+
+    /* ===== GOLD VERTICAL DIVIDER (wide, like Canva) ===== */
+    .gold-divider {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 34pt;
+        background: var(--gold);
+        z-index: 5;
+    }
+
+    /* ============================================================
+       PAGE 1: COVER
+       ============================================================ */
+    .cover {
+        display: flex;
+        height: 100%;
+        overflow: hidden;
+    }
+    .cover-left {
+        width: 43.8%;
+        padding: 36pt 36pt 28pt 36pt;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        z-index: 2;
+    }
+    .cover-right {
+        width: 56.2%;
+        position: relative;
+        padding-top: 20pt;
+        padding-bottom: 74pt;
+    }
+    /* Diagonal clip wrapper — clips hero image/placeholder along the
+       gold bar's left edge. More cropped at top, less at bottom. */
+    .hero-clip {
+        position: absolute;
+        top: 20pt;
+        left: 0;
+        right: 0;
+        bottom: 74pt;
+        clip-path: polygon(21% 0%, 100% 0%, 100% 100%, 0% 100%);
+    }
+    .hero-clip img.hero-photo {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    /* Placeholder when no hero image */
+    .cover-right .hero-placeholder {
+        width: 100%;
+        height: 100%;
+        background: #C8E6FF;
+        position: relative;
+    }
+    .cover-right .hero-placeholder .cloud {
+        position: absolute;
+        top: 18%;
+        left: 30%;
+        width: 180px;
+        height: 80px;
+        background: white;
+        border-radius: 80px;
+    }
+    .cover-right .hero-placeholder .cloud::before {
+        content: "";
+        position: absolute;
+        top: -30px;
+        left: 30px;
+        width: 70px;
+        height: 70px;
+        background: white;
+        border-radius: 50%;
+    }
+    .cover-right .hero-placeholder .cloud::after {
+        content: "";
+        position: absolute;
+        top: -45px;
+        left: 70px;
+        width: 90px;
+        height: 90px;
+        background: white;
+        border-radius: 50%;
+    }
+    /* Rolling hills */
+    .cover-right .hero-placeholder .hills {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 50%;
+    }
+    .cover-right .hero-placeholder .hills::before {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: -10%;
+        width: 120%;
+        height: 80%;
+        background: #7CB342;
+        border-radius: 60% 60% 0 0;
+    }
+    .cover-right .hero-placeholder .hills::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: 20%;
+        width: 100%;
+        height: 60%;
+        background: #558B2F;
+        border-radius: 50% 50% 0 0;
+    }
+
+    /* Diagonal gold accent — two segments with a gap (y=185 to y=371).
+       The left edge of each segment traces the hero image clip-path diagonal:
+       hero clip left edge goes from x=93.5pt at y=20 to x=0 at y=538.
+       skewX(-10.24deg) matches that slope. transform-origin: top left
+       so 'left' = x of the diagonal at that segment's 'top' y. */
+    .gold-bar-top,
+    .gold-bar-bottom {
+        position: absolute;
+        width: 22pt;
+        background: var(--gold);
+        transform: skewX(-10.24deg);
+        transform-origin: top left;
+        z-index: 5;
+    }
+    /* Top segment: from above page down to y=185 */
+    .gold-bar-top {
+        left: 100.7pt;
+        top: -20pt;
+        height: 205pt;
+    }
+    /* Bottom segment: from y=371 to bottom of page */
+    .gold-bar-bottom {
+        left: 30.1pt;
+        top: 371pt;
+        height: 241pt;
+    }
+
+    /* --- Brand row: gold banner + logo --- */
+    .cover-brand-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8pt;
+        position: relative;
+    }
+    .cover-brand {
+        background: var(--gold);
+        display: block;
+        width: calc(100% + 36pt + 44pt);
+        margin-left: -36pt;
+        padding: 8pt 24pt 8pt 36pt;
+        font-size: 20.9pt;
+        color: var(--dark-text);
+        font-weight: normal;
+        font-family: 'Quando', Georgia, serif;
+        white-space: nowrap;
+        position: relative;
+    }
+
+    .cover-brand-logo {
+        width: 71pt;
+        height: 71pt;
+        margin-left: 10pt;
+        flex-shrink: 0;
+        border-radius: 50%;
+        overflow: hidden;
+    }
+    .cover-brand-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    /* --- Property name headline --- */
+    .cover-headline {
+        font-family: 'Merriweather', Georgia, serif;
+        font-size: 50.8pt;
+        font-weight: 700;
+        color: var(--dark-text);
+        line-height: 1.1;
+        padding: 14pt 0 16pt 0;
+        width: calc(100% + 146pt);
+        text-transform: uppercase;
+        text-align: center;
+        position: relative;
+        z-index: 5;
+        margin-left: -36pt;
+        overflow-wrap: break-word;
+        word-wrap: break-word;
+    }
+
+    /* --- Pricing box — SVG: 319.4 x 78.3pt, slanted right edge --- */
+    .cover-price {
+        background: var(--gold);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        width: 319.4pt;
+        margin-left: -36pt;
+        height: 78.3pt;
+        padding: 0 24pt 0 36pt;
+        font-size: 32.2pt;
+        font-weight: normal;
+        line-height: 1.1;
+        color: var(--dark-text);
+        margin-bottom: 16pt;
+        font-family: 'Quando', Georgia, serif;
+        position: relative;
+        z-index: 2;
+        /* Slanted right edge: top-right ~26pt inward, bottom-right full width */
+        clip-path: polygon(0% 0%, 92% 0%, 100% 100%, 0% 100%);
+    }
+    .cover-price .label {
+        font-size: 29.2pt;
+        font-weight: normal;
+        display: block;
+        line-height: 1.1;
+        text-align: left;
+    }
+    .cover-price .value {
+        display: block;
+        text-align: center;
+        line-height: 1.1;
+    }
+
+    /* --- Cover bullet highlights --- */
+    ul.cover-highlights {
+        list-style: disc;
+        padding-left: 28pt;
+        font-size: 23.9pt;
+        font-family: 'Quando', Georgia, serif;
+        font-weight: normal;
+        line-height: 1.5;
+        margin-top: 16pt;
+        margin-bottom: 0;
+        width: calc(100% + 40pt);
+    }
+    ul.cover-highlights li {
+        margin-bottom: 4pt;
+    }
+
+    /* --- Address bar (bottom of right panel, 74pt tall) --- */
+    .cover-address {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 74pt;
+        background: rgba(255,255,255,0.92);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 19.1pt;
+        font-family: 'Quando', Georgia, serif;
+        font-weight: normal;
+        color: var(--dark-text);
+        z-index: 4;
+    }
+
+    /* ============================================================
+       PAGE 2: INVESTMENT & PROPERTY HIGHLIGHTS
+       ============================================================ */
+    .two-col {
+        display: flex;
+        height: 100%;
+        position: relative;
+    }
+    .two-col .col-left {
+        width: 48%;
+        padding: 42pt 36pt;
+    }
+    .two-col .col-right {
+        width: 52%;
+        background: var(--navy);
+        color: var(--white);
+        padding: 42pt 36pt;
+    }
+    .two-col .col-right .section-title {
+        color: var(--white);
+    }
+    .two-col .col-right ul.highlights li {
+        color: var(--white);
+    }
+    .two-col .col-left ul.highlights,
+    .two-col .col-right ul.highlights {
+        font-size: 19.7pt;
+        font-family: 'Quando', Georgia, serif;
+        font-weight: normal;
+        line-height: 1.6;
+    }
+    .two-col .gold-divider {
+        left: calc(48% - 17pt);
+    }
+
+    /* ============================================================
+       PAGE 3: LOCATION HIGHLIGHTS
+       ============================================================ */
+    .location-page {
+        display: flex;
+        height: 100%;
+        position: relative;
+    }
+    .location-left {
+        width: 46%;
+        padding: 56pt 36pt;
+    }
+    .location-right {
+        width: 54%;
+        background: var(--navy);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24pt;
+    }
+    .location-right img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+    .location-left ul.highlights {
+        font-size: 19pt;
+        font-family: 'Quando', Georgia, serif;
+        font-weight: normal;
+        line-height: 1.6;
+    }
+    .location-page .gold-divider {
+        left: calc(40.4% - 17pt);
+    }
+
+    /* ============================================================
+       PAGE 4: PHOTOS
+       ============================================================ */
+    .photos-page {
+        padding: 0;
+    }
+    .photos-top-row {
+        display: flex;
+        height: 50%;
+        padding: 10pt 10pt 4pt 10pt;
+        gap: 6pt;
+        position: relative;
+        z-index: 2;
+    }
+    .photos-top-row img {
+        flex: 1;
+        object-fit: cover;
+        min-width: 0;
+    }
+    .photos-bottom-row {
+        display: flex;
+        height: 37%;
+        padding: 4pt 10pt 10pt 10pt;
+        gap: 6pt;
+        position: relative;
+        z-index: 2;
+    }
+    .photos-bottom-row img {
+        flex: 1;
+        object-fit: cover;
+        min-width: 0;
+    }
+    .photo-placeholder {
+        flex: 1;
+        min-width: 0;
+        background: rgba(53, 49, 85, 0.08);
+        border: 2pt dashed rgba(53, 49, 85, 0.25);
+        border-radius: 6pt;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(53, 49, 85, 0.35);
+        font-size: 14pt;
+        font-family: 'Quando', Georgia, serif;
+        position: relative;
+        z-index: 2;
+    }
+    .photo-placeholder .ph-label {
+        text-align: center;
+        line-height: 1.4;
+    }
+
+    /* ============================================================
+       PAGE 5: FINANCIALS
+       ============================================================ */
+    .financials-page {
+        padding: 0;
+    }
+    .financials-body {
+        padding: 60pt 24pt;
+        text-align: center;
+    }
+    .financials-body img {
+        max-width: 85%;
+        max-height: 85%;
+        object-fit: contain;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    }
+    .financials-placeholder {
+        font-size: 16pt;
+        color: #999;
+        text-align: center;
+    }
+
+    /* ============================================================
+       PAGE 6: CONFIDENTIALITY STATEMENT
+       ============================================================ */
+    .confidentiality-page {
+        padding: 0;
+    }
+    .confidentiality-body {
+        padding: 15pt 10pt 20pt 20pt;
+        font-family: 'Quando', Georgia, serif;
+        font-size: 13pt;
+        font-weight: normal;
+        line-height: 1.45;
+        color: var(--dark-text);
+        position: relative;
+        z-index: 1;
+    }
+
+    /* ============================================================
+       PAGE 7: CONTACT / TEAM
+       ============================================================ */
+    .contact-page {
+        display: flex;
+        height: 100%;
+        position: relative;
+    }
+    .contact-left {
+        width: 49.4%;
+        padding: 28pt 36pt;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    .contact-right {
+        width: 50.6%;
+        background: var(--navy);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--white);
+    }
+    .contact-page .gold-divider {
+        left: calc(49.4% - 17pt);
+    }
+
+    .agent-card {
+        text-align: center;
+        margin-bottom: 16pt;
+    }
+    .agent-card img {
+        width: 171pt;
+        height: 171pt;
+        border-radius: 50%;
+        border: 3pt solid var(--navy);
+        object-fit: cover;
+        margin-bottom: 12pt;
+    }
+    .agent-card .name {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 22pt;
+        font-weight: bold;
+        color: var(--navy);
+        text-decoration: underline;
+        text-underline-offset: 3pt;
+    }
+    .agent-card .title {
+        font-size: 15pt;
+        color: #666;
+        margin-top: 6pt;
+    }
+    .agent-card .email, .agent-card .phone {
+        font-size: 14pt;
+        color: #555;
+        margin-top: 2pt;
+    }
+
+    .contact-right .logo-large {
+        width: 158pt;
+        height: 158pt;
+        margin-bottom: 28pt;
+        border-radius: 50%;
+        overflow: hidden;
+    }
+    .contact-right .logo-large img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .contact-right .company-name {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 27pt;
+        font-weight: bold;
+        text-decoration: underline;
+        text-underline-offset: 4pt;
+        margin-bottom: 28pt;
+        text-align: center;
+        line-height: 1.3;
+    }
+    .contact-right .website {
+        font-size: 20pt;
+        text-decoration: underline;
+    }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     PAGE 1: COVER
+     ============================================================ -->
+<div class="page">
+    <div class="cover">
+        <div class="cover-left">
+            <div class="cover-brand-row">
+                <div class="cover-brand">Resource Realty Group</div>
+                {% if logo %}
+                <div class="cover-brand-logo"><img src="{{ logo }}" alt="RRG Logo"></div>
+                {% endif %}
+            </div>
+
+            <div class="cover-headline">
+                {{ property_name }}
+            </div>
+
+            <div class="cover-price">
+                <span class="label">Pricing:</span>
+                <span class="value">{{ price }}</span>
+            </div>
+
+            <ul class="cover-highlights">
+                {% for item in highlights %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        <div class="cover-right">
+            <div class="gold-bar-top"></div>
+            <div class="gold-bar-bottom"></div>
+            <div class="hero-clip">
+                {% if hero_image %}
+                <img class="hero-photo" src="{{ hero_image }}" alt="Property Photo">
+                {% else %}
+                <div class="hero-placeholder">
+                    <div class="cloud"></div>
+                    <div class="hills"></div>
+                </div>
+                {% endif %}
+            </div>
+            <div class="cover-address">
+                {{ address_line1 }}<br>{{ address_line2 }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE 2: INVESTMENT & PROPERTY HIGHLIGHTS
+     ============================================================ -->
+<div class="page">
+    <div class="two-col">
+        <div class="col-left">
+            <div class="section-title">INVESTMENT<br>HIGHLIGHTS</div>
+            <ul class="highlights">
+                <li>Strong national brand with loyal customer base.</li>
+                <li>Year-round revenue mix from both Grill (hot food) and Chill (desserts).</li>
+                <li>Franchise model with established training and marketing support.</li>
+                <li>Proven QSR concept with scalable operating systems.</li>
+            </ul>
+        </div>
+        <div class="gold-divider"></div>
+        <div class="col-right">
+            <div class="section-title">PROPERTY<br>HIGHLIGHTS</div>
+            <ul class="highlights">
+                <li>Turn-key Dairy Queen Grill &amp; Chill with existing build-out and drive-thru.</li>
+                <li>1,961 SF building on 0.35 acres.</li>
+                <li>Fully equipped site designed for high-volume quick service.</li>
+                <li>Currently operating, minimizing downtime for new ownership.</li>
+            </ul>
+        </div>
+    </div>
+    <div class="logo-watermark">
+        {% if logo %}<img src="{{ logo }}" alt="">{% endif %}
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE 3: LOCATION HIGHLIGHTS
+     ============================================================ -->
+<div class="page">
+    <div class="location-page">
+        <div class="location-left">
+            <div class="section-title">LOCATION<br>HIGHLIGHTS</div>
+            <ul class="highlights">
+                <li>High-visibility position along busy Washtenaw Ave corridor.</li>
+                <li>Strong surrounding residential density.</li>
+                <li>Close proximity to commuter routes and local institutions.</li>
+                <li>Consistent traffic flow between Ypsilanti and Ann Arbor.</li>
+            </ul>
+        </div>
+        <div class="location-right">
+            {% if map_image %}
+            <img src="{{ map_image }}" alt="Location Map">
+            {% else %}
+            <div style="width: 90%; height: 80%; background: rgba(255,255,255,0.1); border: 2pt dashed rgba(255,255,255,0.3); border-radius: 8pt; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.4); font-size: 18pt; text-align: center; font-family: 'Quando', Georgia, serif;">Map Image Placeholder</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="logo-watermark">
+        {% if logo %}<img src="{{ logo }}" alt="">{% endif %}
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE 4: PHOTOS
+     ============================================================ -->
+<div class="page photos-page">
+    <div class="gold-banner">PHOTOS</div>
+    <div class="photos-top-row">
+        {% if photos and photos|length > 0 %}
+            {% for photo in photos[:3] %}
+            <img src="{{ photo }}" alt="Property Photo">
+            {% endfor %}
+        {% else %}
+            <div class="photo-placeholder"><span class="ph-label">Photo 1</span></div>
+            <div class="photo-placeholder"><span class="ph-label">Photo 2</span></div>
+            <div class="photo-placeholder"><span class="ph-label">Photo 3</span></div>
+        {% endif %}
+    </div>
+    <div class="photos-bottom-row">
+        {% if photos and photos|length > 3 %}
+            {% for photo in photos[3:5] %}
+            <img src="{{ photo }}" alt="Property Photo">
+            {% endfor %}
+        {% else %}
+            <div class="photo-placeholder"><span class="ph-label">Photo 4</span></div>
+            <div class="photo-placeholder"><span class="ph-label">Photo 5</span></div>
+        {% endif %}
+    </div>
+    <div class="logo-watermark">
+        {% if logo %}<img src="{{ logo }}" alt="">{% endif %}
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE 5: FINANCIALS
+     ============================================================ -->
+<div class="page financials-page">
+    <div class="gold-banner">FINANCIALS</div>
+    <div class="financials-body">
+        {% if financials_image %}
+        <img src="{{ financials_image }}" alt="Financial Statement">
+        {% else %}
+        <div class="financials-placeholder">Financial statement will be inserted here</div>
+        {% endif %}
+    </div>
+    <div class="logo-watermark">
+        {% if logo %}<img src="{{ logo }}" alt="">{% endif %}
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE 6: CONFIDENTIALITY STATEMENT
+     ============================================================ -->
+<div class="page confidentiality-page">
+    <div class="gold-banner">CONFIDENTIALITY STATEMENT</div>
+    <div class="confidentiality-body">
+        <p>The information contained in the following offering memorandum is proprietary and strictly confidential. It is intended to be reviewed only by the party receiving it from RESOURCE REALTY GROUP and it should not be made available to any other person or entity without the written consent of RESOURCE REALTY GROUP.</p>
+
+        <p>By taking possession of and reviewing the information contained herein the recipient agrees to hold and treat all such information in the strictest confidence. The recipient further agrees that recipient will not photocopy or duplicate any part of the offering memorandum. If you have no interest in the subject property, please promptly return this offering memorandum to RESOURCE REALTY GROUP. This offering memorandum has been prepared to provide summary, unverified financial and physical information to prospective purchasers, and to establish only a preliminary level of interest in the subject property. The information contained herein is not a substitute for a thorough due diligence investigation. RESOURCE REALTY GROUP has not made any investigation, and makes no warranty or representation with respect to the income or expenses for the subject property, the future projected financial performance of the property, the size and square footage of the property and improvements, the presence of absence of contaminating substances, PCBs or asbestos, the compliance with local, state and federal regulations, the physical condition of the improvements thereon, or financial condition or business prospects of any tenant, or any tenant's plans or intentions to continue its occupancy of the subject property. The information contained in this offering memorandum has been obtained from sources we believe reliable; however, RESOURCE REALTY GROUP has not verified, and will not verify, any of the information contained herein, nor has RESOURCE REALTY GROUP conducted any investigation regarding these matters and makes no warranty or representation whatsoever regarding the accuracy or completeness of the information provided.</p>
+
+        <p style="margin-top: 12pt;">All potential buyers must take appropriate measures to verify all of the information set forth herein. Prospective buyers shall be responsible for their costs and expenses of investigating the subject property. PROPERTY SHOWINGS ARE BY APPOINTMENT ONLY. PLEASE CONTACT THE RESOURCE REALTY GROUP ADVISOR FOR MORE DETAILS.</p>
+    </div>
+    <div class="logo-watermark">
+        {% if logo %}<img src="{{ logo }}" alt="">{% endif %}
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE 7: CONTACT / TEAM
+     ============================================================ -->
+<div class="page">
+    <div class="contact-page">
+        <div class="contact-left">
+            <div class="agent-card">
+                {% if larry_photo %}<img src="{{ larry_photo }}" alt="Larry Gotcher">{% endif %}
+                <div class="name">LARRY GOTCHER</div>
+                <div class="title">Real Estate Broker</div>
+                <div class="email">Larrygotcher@gmail.com</div>
+                <div class="phone">(734) 732-3789</div>
+            </div>
+
+            <div class="agent-card">
+                {% if jake_photo %}<img src="{{ jake_photo }}" alt="Jacob Phillips">{% endif %}
+                <div class="name">JACOB PHILLIPS</div>
+                <div class="title">Real Estate Agent</div>
+                <div class="email">jacob@resourcerealtygroupmi.com</div>
+                <div class="phone">(734) 896-0518</div>
+            </div>
+        </div>
+
+        <div class="gold-divider"></div>
+
+        <div class="contact-right">
+            <div class="logo-large">
+                {% if logo %}<img src="{{ logo }}" alt="RRG Logo">{% endif %}
+            </div>
+            <div class="company-name">RESOURCE REALTY<br>GROUP</div>
+            <div class="website">resourcerealtygroupmi.com</div>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

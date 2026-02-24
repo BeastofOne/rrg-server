@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "rrg-brochure"
+version = "0.1.0"
+description = "RRG Brochure Microservice — persistent Flask container with LangGraph + Playwright"
+authors = ["Jake Phillips"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+flask = ">=3.0"
+langgraph = ">=0.2"
+langchain-core = ">=0.3"
+jinja2 = ">=3.1"
+requests = ">=2.31"
+playwright = ">=1.40"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
