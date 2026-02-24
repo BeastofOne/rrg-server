@@ -1,0 +1,108 @@
+summary: Message Router — routes chat messages to worker containers
+description: Synchronous flow called by rrg-router. Branches on target_node to
+  POST to the correct worker container.
+value:
+  modules:
+    - id: a
+      summary: Route by target_node
+      value:
+        type: branchone
+        branches:
+          - summary: PNL Worker
+            modules:
+              - id: b
+                summary: POST to rrg-pnl
+                value:
+                  type: rawscript
+                  content: '!inline post_to_rrg-pnl.inline_script.py'
+                  input_transforms:
+                    chat_history:
+                      type: javascript
+                      expr: flow_input.chat_history
+                    command:
+                      type: javascript
+                      expr: flow_input.command
+                    state:
+                      type: javascript
+                      expr: flow_input.state
+                    target_node:
+                      type: javascript
+                      expr: flow_input.target_node
+                    user_message:
+                      type: javascript
+                      expr: flow_input.user_message
+                  lock: '!inline post_to_rrg-pnl.inline_script.lock'
+                  language: python3
+            expr: flow_input.target_node === 'pnl'
+            parallel: true
+            skip_failure: true
+          - summary: Brochure Worker
+            modules:
+              - id: c
+                summary: POST to rrg-brochure
+                value:
+                  type: rawscript
+                  content: '!inline post_to_rrg-brochure.inline_script.py'
+                  input_transforms:
+                    chat_history:
+                      type: javascript
+                      expr: flow_input.chat_history
+                    command:
+                      type: javascript
+                      expr: flow_input.command
+                    state:
+                      type: javascript
+                      expr: flow_input.state
+                    target_node:
+                      type: javascript
+                      expr: flow_input.target_node
+                    user_message:
+                      type: javascript
+                      expr: flow_input.user_message
+                  lock: '!inline post_to_rrg-brochure.inline_script.lock'
+                  language: python3
+            expr: flow_input.target_node === 'brochure'
+            parallel: true
+            skip_failure: true
+        default:
+          - id: d
+            summary: Unknown worker error
+            value:
+              type: rawscript
+              content: '!inline unknown_worker_error.inline_script.py'
+              input_transforms:
+                state:
+                  type: javascript
+                  expr: flow_input.state
+                target_node:
+                  type: javascript
+                  expr: flow_input.target_node
+              lock: '!inline unknown_worker_error.inline_script.lock'
+              language: python3
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    chat_history:
+      type: array
+      description: Recent chat history
+      items:
+        type: object
+    command:
+      type: string
+      description: 'Command: create or continue'
+    state:
+      type: object
+      description: Worker state from previous invocation
+    target_node:
+      type: string
+      description: 'Worker node name: pnl or brochure'
+    user_message:
+      type: string
+      description: User chat message
+  required:
+    - target_node
+    - command
+    - user_message
+    - chat_history
+    - state

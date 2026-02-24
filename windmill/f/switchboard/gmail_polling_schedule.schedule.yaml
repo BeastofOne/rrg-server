@@ -1,0 +1,10 @@
+args: {}
+cron_version: v2
+email: jacob@resourcerealtygroupmi.com
+enabled: false
+is_flow: false
+no_flow_overlap: false
+schedule: 0 */1 * * * *
+script_path: f/switchboard/gmail_polling_trigger
+timezone: America/New_York
+ws_error_handler_muted: false

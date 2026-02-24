@@ -1,0 +1,114 @@
+summary: Lead Conversation Engine — classify and respond to lead replies
+description: 'Processes replies to CRE outreach emails. Module A: fetch thread +
+  classify intent (Claude). Module B: generate response draft (or terminal for
+  IGNORE/ERROR/OFFER). Module C: approval gate. Module D: post-approval CRM +
+  SMS.'
+value:
+  modules:
+    - id: a
+      summary: Fetch thread + classify reply
+      value:
+        type: rawscript
+        content: '!inline fetch_thread_+_classify_reply.inline_script.py'
+        input_transforms:
+          reply_data:
+            type: javascript
+            expr: flow_input
+        lock: '!inline fetch_thread_+_classify_reply.inline_script.lock'
+        language: python3
+    - id: b
+      summary: Generate response draft
+      value:
+        type: rawscript
+        content: '!inline generate_response_draft.inline_script.py'
+        input_transforms:
+          classify_result:
+            type: javascript
+            expr: results.a
+        lock: '!inline generate_response_draft.inline_script.lock'
+        language: python3
+      stop_after_if:
+        error_message: null
+        expr: result.skipped == true
+        skip_if_stopped: false
+    - id: c
+      summary: Approval gate (reply draft)
+      value:
+        type: rawscript
+        content: '!inline approval_gate_(reply_draft).inline_script.py'
+        input_transforms:
+          response_data:
+            type: javascript
+            expr: results.b
+        lock: '!inline approval_gate_(reply_draft).inline_script.lock'
+        language: python3
+      stop_after_if:
+        error_message: null
+        expr: result.skipped == true
+        skip_if_stopped: false
+      suspend:
+        required_events: 1
+        timeout: 31536000
+    - id: d
+      summary: Post approval (CRM + SMS)
+      value:
+        type: rawscript
+        content: '!inline post_approval_(crm_+_sms).inline_script.py'
+        input_transforms:
+          response_data:
+            type: javascript
+            expr: results.b
+          resume_payload:
+            type: javascript
+            expr: resume
+        lock: '!inline post_approval_(crm_+_sms).inline_script.lock'
+        language: python3
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    has_nda:
+      type: boolean
+      description: Whether lead has NDA on file
+    lead_email:
+      type: string
+      description: Lead email address
+    lead_name:
+      type: string
+      description: Lead name
+    lead_phone:
+      type: string
+      description: Lead phone number
+    message_id:
+      type: string
+      description: Gmail message ID of the reply
+    properties:
+      type: array
+      description: Properties from original outreach
+    reply_body:
+      type: string
+      description: Body text of the reply
+    reply_from:
+      type: string
+      description: Sender of the reply
+    reply_subject:
+      type: string
+      description: Subject of the reply
+    signal_id:
+      type: integer
+      description: Original outreach signal ID
+    source:
+      type: string
+      description: Lead source (Crexi, LoopNet)
+    source_type:
+      type: string
+      description: Source type
+    template_used:
+      type: string
+      description: Template used in original outreach
+    thread_id:
+      type: string
+      description: Gmail thread ID
+    wiseagent_client_id:
+      description: WiseAgent contact ID
+  required: []

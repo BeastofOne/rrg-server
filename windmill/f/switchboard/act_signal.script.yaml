@@ -1,0 +1,22 @@
+summary: Act on Signal — mark jake_signal as acted
+description: Marks a signal as acted upon. Called by Router UI when user clicks
+  an action button.
+lock: '!inline f/switchboard/act_signal.script.lock'
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    acted_by:
+      type: string
+      description: Who acted
+      default: jake
+    action:
+      type: string
+      description: Action taken (approve, reject, edit, discard)
+    signal_id:
+      type: integer
+      description: ID of the signal to act on
+  required:
+    - signal_id
+    - action

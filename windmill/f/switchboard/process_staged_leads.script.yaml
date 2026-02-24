@@ -1,0 +1,15 @@
+summary: 'v2: Clean up batch timer after processing'
+description: 'Fix: delete timer:<email> from processed_notifications after
+  firing intake, so future leads for the same email can schedule new batch
+  timers.'
+lock: '!inline f/switchboard/process_staged_leads.script.lock'
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    email:
+      type: string
+      description: Email address to process staged leads for
+  required:
+    - email

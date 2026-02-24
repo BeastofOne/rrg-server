@@ -1,0 +1,11 @@
+summary: Renew Gmail Watch for leads@ Pub/Sub notifications (every 6 days)
+args: {}
+cron_version: v2
+email: jacob@resourcerealtygroupmi.com
+enabled: true
+is_flow: false
+no_flow_overlap: false
+schedule: 0 0 9 */6 * *
+script_path: f/switchboard/setup_gmail_leads_watch
+timezone: America/Detroit
+ws_error_handler_muted: false

@@ -1,0 +1,8 @@
+summary: Gmail Watch Health Check — monitors both teamgotcher@ and leads@ watches
+description: Daily check that Gmail Pub/Sub webhook is still running. Sends SMS
+  alert to Jake if stale (>48h). Alert message references both setup_gmail_watch
+  and setup_gmail_leads_watch.
+lock: '!inline f/switchboard/check_gmail_watch_health.script.lock'
+kind: script
+schema: null
+tag: ''

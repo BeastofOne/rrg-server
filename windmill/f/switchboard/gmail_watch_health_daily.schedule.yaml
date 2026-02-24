@@ -1,0 +1,13 @@
+summary: Daily Gmail watch health check (10 AM ET)
+description: Checks that gmail_pubsub_webhook has run in the last 48 hours.
+  Sends SMS alert to Jake if stale.
+args: {}
+cron_version: v2
+email: jacob@resourcerealtygroupmi.com
+enabled: true
+is_flow: false
+no_flow_overlap: false
+schedule: 0 0 10 * * *
+script_path: f/switchboard/check_gmail_watch_health
+timezone: America/New_York
+ws_error_handler_muted: false

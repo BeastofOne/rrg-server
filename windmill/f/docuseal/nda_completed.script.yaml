@@ -1,0 +1,14 @@
+summary: DocuSeal NDA Completion Webhook Handler
+description: Receives webhook when someone completes signing an NDA via
+  DocuSeal, then logs the contact to Wise Agent CRM. Uses
+  f/switchboard/wiseagent_oauth (shared with lead pipeline).
+lock: '!inline f/docuseal/nda_completed.script.lock'
+kind: script
+schema:
+  type: object
+  properties:
+    body:
+      type: object
+      description: DocuSeal webhook payload
+  required:
+    - body

@@ -1,0 +1,94 @@
+summary: Lead Intake -- WiseAgent CRM pipeline with approval gate
+description: 'Processes incoming real estate leads: WiseAgent lookup + create,
+  property matching, dedup, Gmail draft creation, approval gate (user
+  sends/deletes draft), then CRM update + SMS on approval. Hopper architecture:
+  one flow per person.'
+value:
+  modules:
+    - id: a
+      summary: WiseAgent lookup + create
+      value:
+        type: rawscript
+        content: '!inline wiseagent_lookup_+_create.inline_script.py'
+        input_transforms:
+          leads:
+            type: javascript
+            expr: flow_input.leads
+        lock: '!inline wiseagent_lookup_+_create.inline_script.lock'
+        language: python3
+    - id: b
+      summary: Property match
+      value:
+        type: rawscript
+        content: '!inline property_match.inline_script.py'
+        input_transforms:
+          leads:
+            type: javascript
+            expr: results.a
+        lock: '!inline property_match.inline_script.lock'
+        language: python3
+    - id: c
+      summary: Dedup and group
+      value:
+        type: rawscript
+        content: '!inline dedup_and_group.inline_script.py'
+        input_transforms:
+          leads:
+            type: javascript
+            expr: results.b
+        lock: '!inline dedup_and_group.inline_script.lock'
+        language: python3
+    - id: d
+      summary: Generate drafts + Gmail
+      value:
+        type: rawscript
+        content: '!inline generate_drafts_+_gmail.inline_script.py'
+        input_transforms:
+          grouped_data:
+            type: javascript
+            expr: results.c
+        lock: '!inline generate_drafts_+_gmail.inline_script.lock'
+        language: python3
+    - id: e
+      summary: Approval gate (draft)
+      value:
+        type: rawscript
+        content: '!inline approval_gate_(draft).inline_script.py'
+        input_transforms:
+          draft_data:
+            type: javascript
+            expr: results.d
+        lock: '!inline approval_gate_(draft).inline_script.lock'
+        language: python3
+      stop_after_if:
+        error_message: null
+        expr: result.skipped == true
+        skip_if_stopped: false
+      suspend:
+        required_events: 1
+        timeout: 31536000
+    - id: f
+      summary: Post approval (CRM + SMS)
+      value:
+        type: rawscript
+        content: '!inline post_approval_(crm_+_sms).inline_script.py'
+        input_transforms:
+          draft_data:
+            type: javascript
+            expr: results.d
+          resume_payload:
+            type: javascript
+            expr: resume
+        lock: '!inline post_approval_(crm_+_sms).inline_script.lock'
+        language: python3
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    leads:
+      type: array
+      description: Array of lead objects
+      items:
+        type: object
+  required:
+    - leads

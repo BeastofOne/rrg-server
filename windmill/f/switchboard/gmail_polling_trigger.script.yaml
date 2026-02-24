@@ -1,0 +1,8 @@
+summary: 'DEPRECATED: Gmail Polling Trigger — replaced by Pub/Sub push'
+description: 'DEPRECATED: Replaced by Pub/Sub push delivery via Tailscale
+  Funnel. Kept as emergency fallback. Schedule is disabled. Only polls
+  teamgotcher@ (does not handle leads@).'
+lock: '!inline f/switchboard/gmail_polling_trigger.script.lock'
+kind: script
+schema: null
+tag: ''

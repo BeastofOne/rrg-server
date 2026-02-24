@@ -1,0 +1,7 @@
+summary: Setup Gmail Watch for Pub/Sub Push Notifications
+description: Sets up Gmail push notifications via users().watch() API. Watches
+  SENT and INBOX labels and publishes to Pub/Sub topic in rrg-gmail-automation.
+  Should be scheduled every 6 days for renewal.
+lock: '!inline f/switchboard/setup_gmail_watch.script.lock'
+kind: script
+schema: null

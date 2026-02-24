@@ -1,0 +1,84 @@
+#extra_requirements:
+#psycopg2-binary
+
+import wmill
+import psycopg2
+import json
+
+
+def main(draft_data: dict):
+    drafts = draft_data.get("drafts", [])
+    summary_text = draft_data.get("summary", "Lead intake ready for review")
+
+    if not drafts:
+        return {"signal_id": None, "skipped": True, "reason": "no_drafts"}
+
+    urls = wmill.get_resume_urls()
+    resume_url = urls.get("resume", "")
+    cancel_url = urls.get("cancel", "")
+
+    draft_id_map = {}
+
+    for i, draft in enumerate(drafts):
+        draft_id = draft.get("gmail_draft_id")
+        thread_id = draft.get("gmail_thread_id")  # Use thread_id (stable) not message_id (changes on send)
+        email = draft.get("email", "")
+
+        if draft_id:
+            draft_id_map[draft_id] = {
+                "email": email,
+                "thread_id": thread_id,
+                "draft_index": i
+            }
+
+    detail = {
+        "preflight_checklist": draft_data.get("preflight_checklist", {}),
+        "drafts": drafts,
+        "info_requests": draft_data.get("info_requests", []),
+        "draft_id_map": draft_id_map,
+        "resume_url": resume_url,
+        "cancel_url": cancel_url,
+        "summary": summary_text
+    }
+
+    actions = ["Approve All", "Reject All"]
+
+    pg = wmill.get_resource("f/switchboard/pg")
+    conn = psycopg2.connect(
+        host=pg["host"],
+        port=pg.get("port", 5432),
+        user=pg["user"],
+        password=pg["password"],
+        dbname=pg["dbname"],
+        sslmode=pg.get("sslmode", "disable")
+    )
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO public.jake_signals
+        (signal_type, source_flow, summary, detail, actions, windmill_job_id, resume_url, cancel_url, status)
+        VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, 'pending')
+        RETURNING id, created_at
+    """, (
+        "approval_needed",
+        "lead_intake",
+        summary_text,
+        json.dumps(detail),
+        json.dumps(actions),
+        "",
+        resume_url,
+        cancel_url
+    ))
+
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "signal_id": row[0],
+        "created_at": str(row[1]),
+        "resume_url": resume_url,
+        "cancel_url": cancel_url,
+        "draft_count": len(draft_id_map)
+    }

@@ -1,0 +1,17 @@
+summary: Read Signals — query jake_signals table
+description: Returns pending signals from jake_signals. Called by Router UI for polling.
+lock: '!inline f/switchboard/read_signals.script.lock'
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    limit:
+      type: integer
+      description: Max rows to return
+      default: 20
+    status:
+      type: string
+      description: Filter by status
+      default: pending
+  required: []

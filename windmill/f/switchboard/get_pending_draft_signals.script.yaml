@@ -1,0 +1,6 @@
+summary: Get pending signals with draft_id_map for Apps Script
+description: Query pending lead_intake signals that have Gmail draft mappings.
+  Called by Google Apps Script to find workflows waiting for draft actions.
+lock: '!inline f/switchboard/get_pending_draft_signals.script.lock'
+kind: script
+schema: null

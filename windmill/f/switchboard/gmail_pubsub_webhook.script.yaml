@@ -1,0 +1,13 @@
+summary: 'v11: Increase batch delay from 15s to 30s'
+description: Give more time for multiple Pub/Sub notifications to arrive before
+  firing intake flow, reducing duplicate flows for same person.
+lock: '!inline f/switchboard/gmail_pubsub_webhook.script.lock'
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    message:
+      type: object
+      description: Pub/Sub push notification message
+  required: []

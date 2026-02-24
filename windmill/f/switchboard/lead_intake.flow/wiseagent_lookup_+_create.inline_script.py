@@ -1,0 +1,205 @@
+#extra_requirements:
+#requests
+#psycopg2-binary
+
+import wmill
+import requests
+import json
+from datetime import datetime, timezone, timedelta
+
+BASE_URL = "https://sync.thewiseagent.com/http/webconnect.asp"
+TOKEN_URL = "https://sync.thewiseagent.com/WiseAuth/token"
+
+def get_token(oauth):
+    """Get valid access token, refreshing if expired."""
+    expires_at = oauth.get("expires_at", "")
+    if expires_at:
+        try:
+            exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) < exp.replace(tzinfo=timezone.utc):
+                return oauth["access_token"]
+        except Exception:
+            pass
+    resp = requests.post(TOKEN_URL, json={"grant_type": "refresh_token", "refresh_token": oauth["refresh_token"], "client_id": oauth.get("client_id", ""), "client_secret": oauth.get("client_secret", "")})
+    resp.raise_for_status()
+    new_tokens = resp.json()
+    oauth["access_token"] = new_tokens["access_token"]
+    oauth["refresh_token"] = new_tokens.get("refresh_token", oauth["refresh_token"])
+    oauth["expires_at"] = new_tokens.get("expires_at", "")
+    try:
+        wmill.set_resource(oauth, "f/switchboard/wiseagent_oauth")
+    except Exception:
+        pass
+    return oauth["access_token"]
+
+def lookup_contact(token, email):
+    resp = requests.get(BASE_URL, params={"requestType": "getContacts", "email": email}, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
+    resp.raise_for_status()
+    contacts = resp.json()
+    if not contacts:
+        return None
+    return contacts[0]
+
+def check_nda_category(contact):
+    cats_raw = contact.get("Categories", "[]")
+    try:
+        cats = json.loads(cats_raw) if isinstance(cats_raw, str) else cats_raw
+        return any(c.get("name", "").lower() == "nda signed" for c in cats)
+    except Exception:
+        return False
+
+def check_followup(token, client_id):
+    """Check if contact has a 'Lead Intake' note from the last 7 days."""
+    try:
+        resp = requests.get(BASE_URL, params={"requestType": "getContactNotes", "ClientID": str(client_id)}, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
+        resp.raise_for_status()
+        notes = resp.json()
+        if isinstance(notes, list):
+            now = datetime.now(timezone.utc)
+            cutoff = now - timedelta(days=7)
+            for note in notes:
+                subject = note.get("Subject", "")
+                if "Lead Intake" not in subject:
+                    continue
+                # Try multiple date fields (WiseAgent API varies)
+                note_date_str = note.get("NoteDate", "") or note.get("DateEntered", "") or note.get("Created", "") or note.get("Date", "")
+                if note_date_str:
+                    try:
+                        note_date = datetime.fromisoformat(note_date_str.replace("Z", "+00:00"))
+                        if not note_date.tzinfo:
+                            note_date = note_date.replace(tzinfo=timezone.utc)
+                        if note_date >= cutoff:
+                            return True
+                    except Exception:
+                        # Can't parse date — skip this note (conservative)
+                        continue
+        return False
+    except Exception:
+        return False
+
+def write_lead_intake_note(token, client_id, source, property_name):
+    """Write a Lead Intake note to WiseAgent for tracking followups."""
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        note_data = {
+            "clientids": str(client_id),
+            "note": f"Lead notification received via {source} on {today}. Property: {property_name}.",
+            "subject": "Lead Intake"
+        }
+        resp = requests.post(
+            BASE_URL + "?requestType=addContactNote",
+            data=note_data,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15
+        )
+        resp.raise_for_status()
+    except Exception:
+        pass  # Non-critical — don't fail the pipeline
+
+def extract_field(response_data, field_name):
+    """Extract a field from WiseAgent API response (handles list or dict)."""
+    if isinstance(response_data, list):
+        for item in response_data:
+            if isinstance(item, dict) and field_name in item:
+                return item[field_name]
+    elif isinstance(response_data, dict):
+        return response_data.get(field_name)
+    return None
+
+def log_contact_creation(lead, client_id):
+    """Log new contact creation to contact_creation_log table (BUG 7A)."""
+    try:
+        import psycopg2
+        pg = wmill.get_resource("f/switchboard/pg")
+        conn = psycopg2.connect(
+            host=pg["host"], port=pg.get("port", 5432),
+            user=pg["user"], password=pg["password"],
+            dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO public.contact_creation_log
+            (email, name, phone, source, source_type, wiseagent_client_id, property_name, raw_lead_data)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        """, (
+            lead.get("email", ""),
+            lead.get("name", ""),
+            lead.get("phone", ""),
+            lead.get("source", ""),
+            lead.get("source_type", ""),
+            str(client_id) if client_id else None,
+            lead.get("property_name", ""),
+            json.dumps(lead)
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception:
+        pass  # Non-critical — don't fail the pipeline over logging
+
+def main(leads: list):
+    oauth = wmill.get_resource("f/switchboard/wiseagent_oauth")
+    token = get_token(oauth)
+    enriched = []
+    for lead in leads:
+        email = lead.get("email", "").strip().lower()
+        result = dict(lead)
+        if not email:
+            result["wiseagent_client_id"] = None
+            result["is_new"] = True
+            result["is_followup"] = False
+            result["has_nda"] = False
+            enriched.append(result)
+            continue
+        contact = lookup_contact(token, email)
+        if contact:
+            client_id = contact["ClientID"]
+            result["wiseagent_client_id"] = client_id
+            result["is_new"] = False
+            result["has_nda"] = check_nda_category(contact)
+            # Followup = existing contact + has "Lead Intake" note from last 7 days
+            result["is_followup"] = check_followup(token, client_id)
+            result["wiseagent_status"] = contact.get("Status", "")
+            result["wiseagent_rank"] = contact.get("Rank", "")
+            # Write lead intake note AFTER followup check (so this note doesn't count for current check)
+            write_lead_intake_note(token, client_id, lead.get("source", ""), lead.get("property_name", ""))
+        else:
+            # ARCHITECTURAL CHANGE: Create contact immediately (moved from Module F)
+            # Every lead exits Module A with a valid wiseagent_client_id
+            name_parts = lead.get("name", "").split(" ", 1)
+            first = name_parts[0] if name_parts else ""
+            last = name_parts[1] if len(name_parts) > 1 else ""
+            create_data = {
+                "CFirst": first, "CLast": last, "CEmail": email,
+                "Source": lead.get("source", "Crexi"), "Status": "Hot Lead"
+            }
+            phone = lead.get("phone", "")
+            if phone:
+                create_data["MobilePhone"] = phone
+            try:
+                resp = requests.post(
+                    BASE_URL + "?requestType=webcontact", data=create_data,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                create_resp = resp.json()
+                client_id = extract_field(create_resp, "ClientID") or extract_field(create_resp, "clientID")
+                result["wiseagent_client_id"] = client_id
+                result["is_new"] = True
+                result["is_followup"] = False  # New contact = never a followup
+                result["has_nda"] = False
+                # Log creation for audit/batch-fix purposes (BUG 7A)
+                log_contact_creation(lead, client_id)
+                # Write lead intake note for new contacts too
+                if client_id:
+                    write_lead_intake_note(token, client_id, lead.get("source", ""), lead.get("property_name", ""))
+            except Exception as e:
+                # If creation fails, continue without client_id
+                result["wiseagent_client_id"] = None
+                result["is_new"] = True
+                result["is_followup"] = False
+                result["has_nda"] = False
+                result["crm_create_error"] = str(e)
+        enriched.append(result)
+    return enriched

@@ -1,0 +1,5 @@
+summary: 'Diagnostic: check ALL headers on sent email'
+description: One-time diagnostic
+lock: '!inline f/switchboard/diagnostic_raw_headers.script.lock'
+kind: script
+schema: null

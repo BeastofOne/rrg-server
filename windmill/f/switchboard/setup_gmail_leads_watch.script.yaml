@@ -1,0 +1,9 @@
+summary: Setup Gmail Watch for leads@ Pub/Sub Push Notifications
+description: Sets up Gmail push notifications via users().watch() API for
+  leads@resourcerealtygroupmi.com. Watches INBOX label only (no SENT — leads@
+  only receives notifications). Publishes to same Pub/Sub topic as teamgotcher@.
+  Should be scheduled every 6 days for renewal.
+lock: '!inline f/switchboard/setup_gmail_leads_watch.script.lock'
+kind: script
+schema: null
+tag: ''

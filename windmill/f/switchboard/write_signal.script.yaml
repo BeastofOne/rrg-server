@@ -1,0 +1,42 @@
+summary: Write Signal — insert a row into jake_signals table
+description: Python script that inserts into public.jake_signals via psycopg2.
+  Called by flows before suspending.
+lock: '!inline f/switchboard/write_signal.script.lock'
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    actions:
+      type: array
+      description: Available actions
+      default: []
+    summary:
+      type: string
+      description: Short display text for the UI
+    cancel_url:
+      type: string
+      description: Cancel URL
+      default: ''
+    detail:
+      type: object
+      description: Full context
+      default: {}
+    resume_url:
+      type: string
+      description: Resume URL
+      default: ''
+    signal_type:
+      type: string
+      description: 'Type: approval_needed, status_update, error'
+    source_flow:
+      type: string
+      description: Which flow created this signal
+    windmill_job_id:
+      type: string
+      description: Windmill job ID
+      default: ''
+  required:
+    - signal_type
+    - source_flow
+    - summary
