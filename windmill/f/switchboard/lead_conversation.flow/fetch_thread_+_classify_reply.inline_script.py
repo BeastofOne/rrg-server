@@ -187,6 +187,7 @@ def main(reply_data: dict):
     lead_phone = reply_data.get("lead_phone", "")
     source = reply_data.get("source", "")
     source_type = reply_data.get("source_type", "")
+    template_used = reply_data.get("template_used", "")
     wiseagent_client_id = reply_data.get("wiseagent_client_id")
     has_nda = reply_data.get("has_nda", False)
     properties = reply_data.get("properties", [])
@@ -218,6 +219,7 @@ def main(reply_data: dict):
         "lead_phone": lead_phone,
         "source": source,
         "source_type": source_type,
+        "template_used": template_used,
         "wiseagent_client_id": wiseagent_client_id,
         "has_nda": has_nda,
         "properties": properties,
