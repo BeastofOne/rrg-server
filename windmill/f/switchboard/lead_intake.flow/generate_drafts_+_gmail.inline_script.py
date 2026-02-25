@@ -1,8 +1,8 @@
 # Module D: Generate Drafts with Gmail Draft Creation
 # Uses Gmail API directly via OAuth to create drafts in teamgotcher@gmail.com
 #
-# Commercial templates (Crexi/LoopNet) signed by Larry.
-# Realtor.com, Seller Hub, Lead Magnet templates signed by Jake.
+# Commercial templates (Crexi/LoopNet) and Lead Magnet signed by Larry.
+# Realtor.com, Seller Hub templates signed by Jake (Phase 3: migrate to Andrea).
 # Followup detection comes from Module A (WiseAgent notes), not Gmail sent folder.
 
 #extra_requirements:

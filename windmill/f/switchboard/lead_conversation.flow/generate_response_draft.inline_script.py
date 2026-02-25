@@ -466,7 +466,7 @@ def main(classify_result: dict):
 
     # Check if this is a lead magnet property — redirect toward active listings
     is_lead_magnet = any(p.get("lead_magnet", False) for p in properties)
-    if is_lead_magnet:
+    if is_lead_magnet and response_type != "not_interested":
         response_type = "lead_magnet_redirect"
 
     # Generate response body with Claude
@@ -509,11 +509,8 @@ def main(classify_result: dict):
         reply_channel = classify_result.get("reply_channel", "email")
         sms_body = None
         if reply_channel == "sms" and cls == "INTERESTED" and lead_phone:
-            is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
-            sender = "Larry" if is_commercial else "Jake"
-            phone_num = "(734) 732-3789" if is_commercial else "(734) 896-0518"
             first_name = lead_name.split()[0] if lead_name else "there"
-            sms_body = f"Hey {first_name}, {sender} from Resource Realty Group here. Just sent you a reply about {prop_names}. My direct line is {phone_num} if you'd rather chat by phone."
+            sms_body = f"Hey {first_name}, {sender_name} from Resource Realty Group here. Just sent you a reply about {prop_names}. My direct line is {phone} if you'd rather chat by phone."
         draft["sms_body"] = sms_body
         draft["reply_channel"] = reply_channel
 
