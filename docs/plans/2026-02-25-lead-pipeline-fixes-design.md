@@ -40,6 +40,33 @@ Already committed to `main` via auto-sync. Need real pipeline test runs to verif
 
 Code at lines 151-159 of `generate_response_draft.inline_script.py` already has Larry/Jake split based on `is_commercial`. Verify with a real test run that commercial leads actually get Larry's signature.
 
+### Phase 1 Verification Results (2026-02-25)
+
+**Source field chain: INTACT**
+- `find_outreach_by_thread()` → extracts `source`, `source_type`, `template_used` from stored draft
+- `reply_data` construction → `**outreach` spreads all fields through
+- Module A → reads `source`/`source_type`, passes through in return dict
+- Module B → reads `source` from `classify_result`, uses for `is_commercial` check
+- **Gap found:** Module A does NOT pass `template_used` through (will be fixed in Task 11)
+
+**`is_commercial` check: CORRECT for all existing source values**
+
+| Source (from Postgres) | `.lower()` | `is_commercial` | Correct? |
+|------------------------|-----------|-----------------|----------|
+| Crexi | crexi | YES | Yes |
+| LoopNet | loopnet | YES | Yes |
+| BizBuySell | (no real data yet) | YES (expected) | Yes |
+| Realtor.com | realtor.com | NO | Yes |
+| Seller Hub | seller hub | NO | Yes |
+| Social Connect | social connect | NO | Edge case — not in any three-way category yet |
+
+**Real signal data verified:**
+- Signal 61: `source=Crexi`, `source_type=crexi_om`, `template_used=commercial_first_outreach_template`
+- Signal 60: `source=Seller Hub`, `source_type=seller_hub`, `template_used=seller_hub`
+- Signal 64 (conversation): `source=Crexi`, `source_type=crexi_phone_click` — correctly inherited
+
+**No code changes needed.** All three premature fixes on main are working correctly.
+
 ---
 
 ## Phase 2: Rigid Lead Conversation Prompts + Lead Magnets (Issues 6, 4, 8)
