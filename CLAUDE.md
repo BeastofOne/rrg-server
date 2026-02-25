@@ -9,7 +9,8 @@ rrg-server/
 ├── rrg-router/            # Streamlit chat UI + intent router (port 8501)
 ├── rrg-pnl/              # P&L analysis (LangGraph + Flask, port 8100)
 ├── rrg-brochure/          # Property brochure generator (LangGraph + Flask, port 8101)
-├── rrg-claude-endpoint/   # Claude API proxy (Node.js + pm2, port 8787)
+├── windmill-worker/       # Nix flake: stock Windmill + Claude CLI layer
+├── rrg-claude-endpoint/   # DEPRECATED — Claude CLI now in containers directly
 ├── rrg-email-assistant/   # Email automation (MCP tools, no server)
 ├── windmill-mcp/          # Local Windmill MCP server (Node.js)
 ├── windmill/              # Windmill flows/scripts (auto-synced from DB)
@@ -21,7 +22,7 @@ rrg-server/
 ## System Architecture
 
 **Four machines on Tailscale** (details → `.claude/rules/network.md`):
-- **jake-macbook** — Claude Code, claude-endpoint (pm2)
+- **jake-macbook** — Claude Code
 - **rrg-server** — Docker containers (pnl, brochure, router), Windmill, Postgres, DocuSeal
 - **pixel-9a** — SMS gateway (Termux + Flask, port 8686)
 - **larry-sms-gateway** — iMessage relay
@@ -49,7 +50,7 @@ rrg-server/
 ## Windmill Resources & Variables
 
 Resources: `wiseagent_oauth`, `gmail_oauth`, `gmail_leads_oauth`, `pg`, `tailscale_machines`
-Variables: `property_mapping`, `gmail_last_history_id`, `gmail_leads_last_history_id`, `sms_gateway_url`, `claude_endpoint_url`, `router_token`
+Variables: `property_mapping`, `gmail_last_history_id`, `gmail_leads_last_history_id`, `sms_gateway_url`, `router_token`
 (All under `f/switchboard/` namespace)
 
 ## Deployment
