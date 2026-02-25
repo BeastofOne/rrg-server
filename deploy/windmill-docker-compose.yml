@@ -41,6 +41,7 @@ services:
       METRICS_ADDR: "false"
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-haiku}
+      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN,CLAUDE_MODEL
     depends_on:
       db:
         condition: service_healthy
