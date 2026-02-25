@@ -236,13 +236,14 @@ def main(grouped_data: dict):
             draft["sms_body"] = f"Hey {first_name}, this is Jake from Resource Realty Group. I heard you might be looking to sell your home in {city}. Is that accurate?" if phone else None
             draft["template_used"] = "seller_hub"
 
-        # 3. Lead magnet — all properties are lead_magnet (signed Jake)
+        # 3. Lead magnet — all properties are lead_magnet (signed Larry for commercial)
         elif has_lead_magnet and not non_magnet_props:
             magnet = properties[0]
-            override = magnet.get("response_override", "")
-            draft["email_subject"] = f"RE: Your Interest in {magnet.get('canonical_name', '')}"
-            draft["email_body"] = f"Hey {first_name},\n\n{override}\n\nIf you'd rather talk over the phone, my direct line is (734) 896-0518. Please do not hesitate to reach out with any questions or concerns.\n\nAll The Best,\nJake"
-            draft["sms_body"] = f"Hey {first_name}, this is Jake from Resource Realty Group. {override} My direct line is (734) 896-0518." if phone else None
+            canonical = magnet.get("canonical_name", "")
+            addr = magnet.get("property_address") or canonical
+            draft["email_subject"] = f"RE: Your Interest in {canonical}"
+            draft["email_body"] = f"Hey {first_name},\n\nI got your information when you checked out my listing for {addr}. That property is no longer available, but we have some similar properties that might be a good fit depending on what you're looking for.\n\nIf you'd like to check out what we have, just let me know and I can send over some information. We also have some off-market properties that would require an NDA to be signed.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns.\n\nTalk soon,\nLarry"
+            draft["sms_body"] = f"Hey {first_name}, this is Larry from Resource Realty Group. I saw you checked out {canonical}. That one's no longer available, but I have some similar properties. Let me know if you're interested! My direct line is (734) 732-3789." if phone else None
             draft["template_used"] = "lead_magnet"
 
         # 4-7. Commercial (Crexi/LoopNet) — signed Larry
