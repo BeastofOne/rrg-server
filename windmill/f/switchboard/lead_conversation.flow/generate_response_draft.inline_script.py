@@ -147,16 +147,37 @@ def generate_response_with_claude(classify_result, response_type):
     wants = classification.get("wants", []) or []
     reply_body = classify_result.get("reply_body", "")
 
-    # Determine signoff based on source
+    # Source classification
     is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
-    if is_commercial:
+    is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
+    is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
+
+    # Determine signer — check template_used for in-flight thread continuity
+    template_used = classify_result.get("template_used", "")
+    if template_used.startswith("commercial_") or template_used == "lead_magnet":
+        # In-flight thread — keep Larry
         signoff = "Talk soon,\nLarry"
         phone = "(734) 732-3789"
         sender_name = "Larry"
+    elif template_used.startswith("residential_"):
+        # In-flight thread — keep Andrea
+        signoff = "ANDREA_SIGNOFF_TBD"
+        phone = "ANDREA_PHONE_TBD"
+        sender_name = "Andrea"
+    elif is_commercial:
+        signoff = "Talk soon,\nLarry"
+        phone = "(734) 732-3789"
+        sender_name = "Larry"
+    elif is_residential_buyer or is_residential_seller:
+        # Placeholder — will be filled in Phase 3 with Andrea's details
+        signoff = "ANDREA_SIGNOFF_TBD"
+        phone = "ANDREA_PHONE_TBD"
+        sender_name = "Andrea"
     else:
-        signoff = "All The Best,\nJake"
-        phone = "(734) 896-0518"
-        sender_name = "Jake"
+        # Unknown source — default to Larry for now
+        signoff = "Talk soon,\nLarry"
+        phone = "(734) 732-3789"
+        sender_name = "Larry"
 
     # Build property context
     prop_details = []

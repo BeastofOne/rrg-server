@@ -197,6 +197,8 @@ def main(grouped_data: dict):
         has_lead_magnet = any(p.get("lead_magnet") for p in properties)
         non_magnet_props = [p for p in properties if not p.get("lead_magnet")]
         is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
+        is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
+        is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
 
         draft = {
             "name": lead["name"],
