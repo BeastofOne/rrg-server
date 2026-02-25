@@ -106,7 +106,7 @@ Input: { thread_id, message_id, reply_body, reply_subject, reply_from,
 
 Fetches the full Gmail thread via `threads().get()`, formats messages chronologically (oldest first), then sends the thread context + latest reply to Claude (haiku model) for intent classification.
 
-**Claude endpoint:** Uses `f/switchboard/claude_endpoint_url` (jake-macbook proxy at `http://100.108.74.112:8787`). Sends `POST` with `{prompt, model: "haiku", systemPrompt}`.
+**Claude CLI:** Uses `subprocess.run(["claude", "-p", ...])` calling the Claude CLI installed in the Windmill worker container (`/usr/local/bin/claude`, teamgotcher account). Env vars `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_MODEL` passed through via `WHITELIST_ENVS`.
 
 **Classification prompt asks Claude for JSON:**
 ```json
@@ -257,11 +257,7 @@ The SENT path in `gmail_pubsub_webhook` now searches for pending signals from bo
 
 ## Windmill Resources and Variables
 
-Uses the same resources as lead intake, plus:
-
-| Variable | Purpose |
-|----------|---------|
-| `f/switchboard/claude_endpoint_url` | Claude API proxy on jake-macbook (`http://100.108.74.112:8787`) — used for intent classification and response generation |
+Uses the same resources as lead intake:
 
 **Shared with lead intake:**
 - `f/switchboard/gmail_oauth` — Gmail API access
@@ -282,4 +278,4 @@ From the original plan, these remain:
 
 ---
 
-*Last updated: February 23, 2026 — Updated resume latency from ~1 minute (polling) to ~2-5 seconds (Pub/Sub push)*
+*Last updated: February 25, 2026 — Migrated from deprecated HTTP claude_endpoint_url to subprocess Claude CLI in Windmill worker. E2E tested successfully.*
