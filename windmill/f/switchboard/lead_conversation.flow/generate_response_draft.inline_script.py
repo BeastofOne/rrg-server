@@ -147,7 +147,7 @@ def generate_response_with_claude(classify_result, response_type):
     reply_body = classify_result.get("reply_body", "")
 
     # Determine signoff based on source
-    is_commercial = source_type in ("crexi_om", "crexi_flyer", "loopnet")
+    is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
     if is_commercial:
         signoff = "Talk soon,\nLarry"
         phone = "(734) 732-3789"
@@ -407,7 +407,7 @@ def main(classify_result: dict):
         # Determine SMS body for INTERESTED replies
         sms_body = None
         if cls == "INTERESTED" and lead_phone:
-            is_commercial = source_type in ("crexi_om", "crexi_flyer", "loopnet")
+            is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
             sender = "Larry" if is_commercial else "Jake"
             phone_num = "(734) 732-3789" if is_commercial else "(734) 896-0518"
             first_name = lead_name.split()[0] if lead_name else "there"
