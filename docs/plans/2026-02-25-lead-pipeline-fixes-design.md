@@ -58,7 +58,7 @@ Code at lines 151-159 of `generate_response_draft.inline_script.py` already has 
 | BizBuySell | (no real data yet) | YES (expected) | Yes |
 | Realtor.com | realtor.com | NO | Yes |
 | Seller Hub | seller hub | NO | Yes |
-| Social Connect | social connect | NO | Same as Seller Hub — needs mapping in three-way split (Task 6) |
+| Social Connect | social connect | NO | Same as Seller Hub — needs mapping in three-way split (Task 8) |
 
 **Real signal data verified:**
 - Signal 61: `source=Crexi`, `source_type=crexi_om`, `template_used=commercial_first_outreach_template`
