@@ -80,6 +80,16 @@ The global `~/.claude/` layer is doing triple duty — holding universal Jake st
 
 78 lines documenting a DEPRECATED service. The root CLAUDE.md already notes it as deprecated in the directory tree. Delete the file entirely.
 
+### 5. Delete `rrg-server/.claude/rules/email.md`
+
+Fully redundant or outdated:
+- Gmail integration section — outdated (early automation attempts, ~1 month old)
+- Mandatory rules — outdated (reply vs new email rules from early attempts, CC Jasmin no longer applies)
+- Jake's signature — already in global `~/.claude/CLAUDE.md` under Communication Style
+- "Never send fix emails" — already in global `~/.claude/rules/safety.md`
+
+Delete the entire file.
+
 ### 5. Initialize auto-memory for rrg-server
 
 Create `~/.claude/projects/-Users-jacobphillips-rrg-server/memory/MEMORY.md` with:
