@@ -263,16 +263,18 @@ The largest module. Selects an email template for each lead based on source type
 
 **Template selection logic (order matters):**
 
-| Priority | Source Type | Condition | Template | Signed By |
-|----------|------------|-----------|----------|-----------|
-| 1 | `realtor_com` | — | Tour inquiry response | Jake |
-| 2 | `seller_hub` | — | Seller outreach | Jake |
-| 3 | Any | All properties are lead magnets | Lead magnet response (uses `response_override`) | Jake |
-| 4 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
-| 5 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
-| 6 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Single property, followup | `commercial_followup_template` | Larry |
-| 7 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Single property, first contact | `commercial_first_outreach_template` | Larry |
+| Priority | Source | Condition | Template | Signed By |
+|----------|--------|-----------|----------|-----------|
+| 1 | Realtor.com | `source.lower() == "realtor.com"` | Residential buyer inquiry | Andrea |
+| 2 | Seller Hub, Social Connect | `is_residential_seller` | Residential seller outreach | Andrea |
+| 3 | Any | All properties are lead magnets | Lead magnet response | Larry |
+| 4 | Crexi / LoopNet / BizBuySell | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
+| 5 | Crexi / LoopNet / BizBuySell | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
+| 6 | Crexi / LoopNet / BizBuySell | Single property, followup | `commercial_followup_template` | Larry |
+| 7 | Crexi / LoopNet / BizBuySell | Single property, first contact | `commercial_first_outreach_template` | Larry |
 | 8 | Unknown | — | Skip (no draft created) | — |
+
+**Residential templates (Realtor.com, Seller Hub, Social Connect):** All residential templates are signed by Andrea with phone (734) 223-1015. HTML signatures are appended automatically from the `f/switchboard/email_signatures` Windmill variable. Each template has a matching SMS version.
 
 **Commercial templates (Crexi/LoopNet/BizBuySell):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
 

@@ -2,7 +2,7 @@
 # Uses Gmail API directly via OAuth to create drafts in teamgotcher@gmail.com
 #
 # Commercial templates (Crexi/LoopNet) and Lead Magnet signed by Larry.
-# Realtor.com, Seller Hub templates signed by Jake (Phase 3: migrate to Andrea).
+# Residential templates (Realtor.com, Seller Hub, Social Connect) signed by Andrea.
 # Followup detection comes from Module A (WiseAgent notes), not Gmail sent folder.
 
 #extra_requirements:
@@ -230,8 +230,7 @@ def main(grouped_data: dict):
         has_lead_magnet = any(p.get("lead_magnet") for p in properties)
         non_magnet_props = [p for p in properties if not p.get("lead_magnet")]
         is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
-        is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
-        is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
+        is_residential_seller = source.lower() in ("seller hub", "social connect", "upnest")
 
         draft = {
             "name": lead["name"],
@@ -250,24 +249,25 @@ def main(grouped_data: dict):
 
         # --- Template selection (order matters) ---
 
-        # 1. Realtor.com (signed Jake)
-        if source_type == "realtor_com":
+        # 1. Realtor.com (residential buyer, signed Andrea)
+        if source.lower() == "realtor.com":
             prop = properties[0] if properties else {}
             addr = prop.get("property_address") or prop.get("canonical_name", "your property")
-            draft["email_subject"] = f"Re: Realtor.com Inquiry-- {addr}"
-            draft["email_body"] = f"Hey {first_name},\n\nI received your Realtor.com inquiry about {addr}. Are you looking to take a tour? Or is there something else I can help you with?"
-            draft["sms_body"] = f"Hey {first_name}, this is Jake from Resource Realty Group. I received your Realtor.com inquiry about {addr}. Would you like to take a tour? Or is there something else I can help you with?" if phone else None
+            canonical = prop.get("canonical_name", addr)
+            draft["email_subject"] = f"RE: Your Realtor.com inquiry in {canonical}"
+            draft["email_body"] = f"Hey {first_name},\n\nI received your Realtor.com inquiry about {addr}. If you'd like more information, just let me know and I'll be more than happy to answer any questions you may have. Should you want to view the property, just let me know the best day and time that works for you and I'll get that scheduled. Keep in mind the sooner the better as properties are selling quick.\n\nIf you'd rather talk over the phone, my direct line is (734) 223-1015. Please do not hesitate to reach out with any questions or concerns."
+            draft["sms_body"] = f"Hey {first_name}, this is Andrea. I received your Realtor.com inquiry about {addr}. If you'd like more information or to schedule a tour, just let me know the best day & time that works for you and I'll get that scheduled. Keep in mind the sooner, the better as properties sell quickly." if phone else None
             draft["template_used"] = "realtor_com"
 
-        # 2. Seller Hub (signed Jake)
-        elif source_type == "seller_hub":
+        # 2. Residential seller (Seller Hub, UpNest, Top Producer, Social Connect — signed Andrea)
+        elif is_residential_seller:
             prop = properties[0] if properties else {}
             addr = prop.get("property_address") or prop.get("canonical_name", "your property")
-            city = addr.split(",")[1].strip() if "," in addr else "your area"
-            draft["email_subject"] = f"Re: Your Property at {addr}"
-            draft["email_body"] = f"Hey {first_name},\n\nI heard you might be interested in selling your place at {addr}. Is there a good time we can talk? I think I can help you."
-            draft["sms_body"] = f"Hey {first_name}, this is Jake from Resource Realty Group. I heard you might be looking to sell your home in {city}. Is that accurate?" if phone else None
-            draft["template_used"] = "seller_hub"
+            canonical = prop.get("canonical_name", addr)
+            draft["email_subject"] = f"RE: Your interest in {canonical}"
+            draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out my property, {addr}. If you'd like more information, just let me know and I'll be more than happy to answer any questions you may have. Should you want to view the property, just let me know the best day and time that works for you and I'll get that scheduled. Keep in mind the sooner the better as properties are selling quick.\n\nIf you'd rather talk over the phone, my direct line is (734) 223-1015. Please do not hesitate to reach out with any questions or concerns."
+            draft["sms_body"] = f"Hey {first_name}, this is Andrea from Resource Realty Group. I got your info when you checked out {addr}. If you'd like more information or to schedule a viewing, just let me know! My direct line is (734) 223-1015." if phone else None
+            draft["template_used"] = "residential_seller"
 
         # 3. Lead magnet — all properties are lead_magnet (signed Larry for commercial)
         elif has_lead_magnet and not non_magnet_props:
