@@ -90,14 +90,31 @@ Fully redundant or outdated:
 
 Delete the entire file.
 
-### 5. Initialize auto-memory for rrg-server
+### 6. Initialize auto-memory for rrg-server
 
 Create `~/.claude/projects/-Users-jacobphillips-rrg-server/memory/MEMORY.md` with:
 - Note that `rrg-claude-endpoint` is deprecated (CLAUDE.md deleted Feb 2026)
 - Note that jake-server skills were moved out of global (Feb 2026)
 - Note that lead intake / NDA skills were deleted as stale — recreate from current docs if needed
 
-### 6. Create jake-server skills directory
+### 8. Migrate orphaned memory to correct path
+
+Memory files are stranded at the old Desktop path:
+- **Old (orphaned):** `~/.claude/projects/-Users-jacobphillips-Desktop-rrg-server/memory/MEMORY.md` (123 lines)
+- **Current (empty):** `~/.claude/projects/-Users-jacobphillips-rrg-server/memory/MEMORY.md`
+
+The old memory has valuable notes (deleted systems, renames, Gmail split inbox, Windmill MCP, Docker gotchas, deploy keys, sync setup) that aren't loading in current sessions.
+
+**Action:** Migrate the old memory content into the current path. During migration, audit each section:
+- Remove anything that's now covered by project docs or CLAUDE.md (no duplication)
+- Remove jake-server-specific content (Pixel 9a hardware specs belong in jake-server)
+- Keep rrg-server operational notes, gotchas, and infrastructure decisions
+
+Also migrate the home-directory memory (`-Users-jacobphillips/memory/`) — the infrastructure.md has rrg-server content (Windmill worker Nix gotchas, Docker compose project names) that belongs in the rrg-server memory.
+
+After migration, delete the orphaned old-path memory directory.
+
+### 9. Create jake-server skills directory
 
 Create `~/Desktop/jake-server/.claude/skills/` and move the 8 skills there. This parks them cleanly so they're out of global scope but preserved for when jake-server gets rebuilt.
 
@@ -106,7 +123,7 @@ Create `~/Desktop/jake-server/.claude/skills/` and move the 8 skills there. This
 ## What we're NOT changing
 
 - `rrg-server/CLAUDE.md` (90 lines, accurate, reasonable size)
-- `rrg-server/.claude/rules/` (network.md, email.md, doc-sync.md — all current, right size)
+- `rrg-server/.claude/rules/` (network.md, doc-sync.md — current, right size)
 - Child project CLAUDE.md files (rrg-pnl, rrg-brochure, rrg-router, rrg-email-assistant) — not audited this pass
 - `~/.claude/rules/verification.md` — universal, no changes needed
 - `~/.claude/settings.local.json` — accumulated Bash permissions, cosmetic clutter, separate cleanup
