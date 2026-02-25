@@ -133,6 +133,35 @@ This keeps key facts in context every session (~10 lines) without loading 1,776 
 
 Create `~/Desktop/jake-server/.claude/skills/` and move the 8 skills there. This parks them cleanly so they're out of global scope but preserved for when jake-server gets rebuilt.
 
+### 10. Clean up `rrg-server/.claude/settings.local.json` — remove secrets and one-off commands
+
+**Security issue:** This file is tracked in git and contains **24 lines with hardcoded API tokens, OAuth tokens, and Windmill Bearer tokens** baked into Bash permission strings. The repo is private, but secrets in version history is bad practice.
+
+**Bloat issue:** 265 permission entries, most of which are one-time debugging commands:
+- `adb` phone rooting commands (Pixel 9a setup — done)
+- Windmill job ID inspection loops with hardcoded UUIDs
+- MCP server debugging sessions (dozens of test commands)
+- pm2 claude-endpoint commands (deprecated service)
+- `git filter-repo` commands (one-time secret scrub)
+- `nix-prefetch-url` gem hash commands (one-time DocuSeal build)
+- Old Desktop path references (`~/Desktop/rrg-server/...`)
+
+**Where secrets should and shouldn't live:**
+- **`~/.secrets/jake-system.json`** — master secrets file (intended single source of truth)
+- **`~/.claude.json` MCP env blocks** — tokens passed to MCP servers (HubSpot PAT, Windmill token, DocuSeal API key). This is necessary — it's the only way MCP servers get credentials. No indirection layer exists.
+- **`settings.local.json` Bash permissions** — tokens leaked here accidentally when Claude Code auto-saved approved commands. These are NOT configuration — they're accidents to clean up.
+
+**Action:**
+1. Replace the current project `settings.local.json` with a clean version containing only permissions that are still actively needed (Windmill MCP tools, ssh, git, common utilities)
+2. Remove ALL entries containing hardcoded tokens/secrets (leaked from auto-saved Bash approvals)
+3. Remove ALL one-time debugging commands
+4. Remove ALL references to deprecated services (claude-endpoint, pm2)
+5. Remove ALL references to old Desktop paths
+
+Also clean up `~/.claude/settings.local.json` (global) which has similar accumulated one-off entries (94 permissions).
+
+**Note:** Secrets are already in git history. The repo is private, but consider rotating exposed tokens after cleanup.
+
 ---
 
 ## What we're NOT changing
@@ -141,7 +170,6 @@ Create `~/Desktop/jake-server/.claude/skills/` and move the 8 skills there. This
 - `rrg-server/.claude/rules/` (network.md, doc-sync.md — current, right size)
 - Child project CLAUDE.md files (rrg-pnl, rrg-brochure, rrg-router, rrg-email-assistant) — not audited this pass
 - `~/.claude/rules/verification.md` — universal, no changes needed
-- `~/.claude/settings.local.json` — accumulated Bash permissions, cosmetic clutter, separate cleanup
 - Superpowers plugin skills (14 skills in plugin cache, managed by plugin)
 
 ---
