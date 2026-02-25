@@ -31,6 +31,7 @@ services:
 
   windmill_worker:
     image: windmill-worker:latest
+    command: windmill
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD env var must be set}@db/windmill?sslmode=disable
