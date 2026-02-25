@@ -182,6 +182,23 @@ Trigger real test leads from LoopNet and BizBuySell through the full pipeline af
 
 ---
 
+## Cross-Phase Dependencies & Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Old threads signed by Jake, new replies come from Andrea | In-flight threads keep original signer. Store signer in signal at outreach time; lead_conversation reads signer from signal for thread continuity. |
+| Phase 2 prompts reference fact sheet data that barely exists | Option B: prompts gracefully handle missing data ("I'll check on that and get back to you"). Point at online master sheet as interim data source. Gets richer as fact sheets are populated. |
+| Phase 2 and Phase 3 both touch template selection branching | Design three-way split (commercial / residential / unknown) from the start in Phase 2, even if residential branch is empty. Phase 3 fills it in. |
+| `lead_type` derivation needs `source` to survive webhook → intake → signal → conversation | Verify source field preservation during Phase 1 testing. Currently stored in jake_signals and passed through. |
+| Realtor.com fast-path changes the webhook architecture | Design in Phase 3, be aware it touches webhook code that Phase 1 validates. |
+| Source classification logic (`is_commercial`) duplicated across multiple files | Centralize into shared Windmill variable or utility. Single source of truth for which sources are commercial, residential buyer, residential seller. |
+
+### Interim Data Source for Property Facts
+
+Until full fact sheets are built, the online master sheet serves as the data source. The master sheet URL and Google Drive file paths for brochures, financials, etc. will be stored in `property_mapping` or as a Windmill variable. Full fact sheet population is a separate project.
+
+---
+
 ## Parked Items (Future Sessions)
 
 | Item | Reason |
