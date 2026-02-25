@@ -114,6 +114,21 @@ Also migrate the home-directory memory (`-Users-jacobphillips/memory/`) — the 
 
 After migration, delete the orphaned old-path memory directory.
 
+The migrated memory should include a "Quick Facts" section — one-liner summaries of key operational facts from the docs/ files. This prevents dropping knowledge that's technically in docs but not auto-loaded:
+
+```
+## Quick Facts (details in docs/)
+- Lead intake trigger: Pub/Sub push (~2-5s), NOT polling. Polling is deprecated.
+- Split inbox: leads@ receives notifications, teamgotcher@ sends drafts/receives replies
+- Lead sources: Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, Social Connect
+- Resume mechanism: thread_id matching (Gmail strips X-headers)
+- CRM for lead intake: WiseAgent (not HubSpot)
+- Approval UI: Gmail (send draft = approve, delete draft = reject)
+- Templates: Larry signs commercial (Crexi/LoopNet/BizBuySell), Jake signs residential/seller
+```
+
+This keeps key facts in context every session (~10 lines) without loading 1,776 lines of docs.
+
 ### 9. Create jake-server skills directory
 
 Create `~/Desktop/jake-server/.claude/skills/` and move the 8 skills there. This parks them cleanly so they're out of global scope but preserved for when jake-server gets rebuilt.
