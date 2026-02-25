@@ -153,7 +153,7 @@ Respond with ONLY valid JSON (no markdown fences, no explanation outside the JSO
         )
 
         if result.returncode != 0:
-            error_msg = result.stderr.strip() or f"Claude CLI exited with code {result.returncode}"
+            error_msg = f"Claude CLI exit code {result.returncode}. stderr: {result.stderr.strip()[:500]}. stdout: {result.stdout.strip()[:500]}"
             raise RuntimeError(error_msg)
 
         result_text = result.stdout.strip()
