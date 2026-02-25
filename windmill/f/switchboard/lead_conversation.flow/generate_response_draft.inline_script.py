@@ -103,7 +103,7 @@ def write_notification_signal(summary, detail):
         return None
 
 
-def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None):
+def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None, html_signature=""):
     """Create a Gmail draft as a reply in an existing thread."""
     oauth = wmill.get_resource("f/switchboard/gmail_oauth")
     creds = Credentials(
@@ -116,6 +116,8 @@ def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None):
     service = build('gmail', 'v1', credentials=creds)
 
     html_body = body.replace('\n', '<br>')
+    if html_signature:
+        html_body = html_body + '<br><br>' + html_signature
     message = MIMEText(html_body, 'html')
     message['to'] = to_email
     message['subject'] = subject if subject.lower().startswith('re:') else f'Re: {subject}'
@@ -135,25 +137,43 @@ def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None):
     }
 
 
-def determine_signer(source, template_used):
-    """Determine sender name, phone, and signoff based on source and template continuity."""
-    is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
-    is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
-    is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
-
-    if template_used.startswith("commercial_") or template_used == "lead_magnet":
-        return "Larry", "(734) 732-3789", "Talk soon,\nLarry"
-    elif template_used.startswith("residential_"):
-        return "Andrea", "ANDREA_PHONE_TBD", "ANDREA_SIGNOFF_TBD"
-    elif is_commercial:
-        return "Larry", "(734) 732-3789", "Talk soon,\nLarry"
-    elif is_residential_buyer or is_residential_seller:
-        return "Andrea", "ANDREA_PHONE_TBD", "ANDREA_SIGNOFF_TBD"
-    else:
-        return "Larry", "(734) 732-3789", "Talk soon,\nLarry"
+def get_signer_config():
+    """Load signer config from Windmill variable (HTML signatures, phones, source mapping)."""
+    raw = wmill.get_variable("f/switchboard/email_signatures")
+    return json.loads(raw)
 
 
-def generate_response_with_claude(classify_result, response_type):
+def determine_signer(source, template_used, sig_config=None):
+    """Determine sender name, phone, and HTML signature based on source and template continuity."""
+    if sig_config is None:
+        sig_config = get_signer_config()
+
+    signers = sig_config.get("signers", {})
+    if not signers:
+        return "Larry", "(734) 732-3789", ""
+
+    # Check template_used first (in-flight thread continuity)
+    for prefix, signer_key in sig_config.get("template_prefix_to_signer", {}).items():
+        if template_used == prefix or template_used.startswith(prefix):
+            signer = signers.get(signer_key, {})
+            if signer:
+                return signer["name"], signer["phone"], signer["html_signature"]
+
+    # Fall back to source classification
+    src = source.lower()
+    for group in sig_config.get("source_to_signer", {}).values():
+        if src in group["sources"]:
+            signer = signers.get(group["signer"], {})
+            if signer:
+                return signer["name"], signer["phone"], signer["html_signature"]
+
+    # Default
+    default_key = sig_config.get("default_signer", "larry")
+    signer = signers.get(default_key, {})
+    return signer.get("name", "Larry"), signer.get("phone", "(734) 732-3789"), signer.get("html_signature", "")
+
+
+def generate_response_with_claude(classify_result, response_type, sender_name, phone):
     """Use Claude to generate a contextual email response."""
     lead_name = classify_result.get("lead_name", "")
     first_name = lead_name.split()[0] if lead_name else "there"
@@ -164,10 +184,6 @@ def generate_response_with_claude(classify_result, response_type):
     classification = classify_result.get("classification", {})
     wants = classification.get("wants", []) or []
     reply_body = classify_result.get("reply_body", "")
-
-    # Determine signer from source + template_used
-    template_used = classify_result.get("template_used", "")
-    sender_name, phone, signoff = determine_signer(source, template_used)
 
     # Build property context
     prop_details = []
@@ -197,7 +213,6 @@ def generate_response_with_claude(classify_result, response_type):
 
 SENDER IDENTITY:
 - You are {sender_name} from Resource Realty Group
-- Signoff: {signoff}
 
 LEAD CONTEXT:
 - Lead's first name: {first_name}
@@ -206,12 +221,12 @@ LEAD CONTEXT:
 STRUCTURE (follow exactly):
 1. Greeting: "Hey {first_name},"
 2. Body: 2-3 sentences max. Be gracious, don't be pushy, don't try to change their mind. Leave the door open for future contact.
-3. Signoff: Use exactly: {signoff}
 
 RULES:
 - Do NOT include a subject line
 - Do NOT mention any property details or pricing
 - Do NOT suggest alternative properties
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
 - Write ONLY the email body text"""
 
     elif response_type == "general_interest":
@@ -220,7 +235,6 @@ RULES:
 SENDER IDENTITY:
 - You are {sender_name} from Resource Realty Group
 - Your direct line: {phone}
-- Signoff: {signoff}
 
 LEAD CONTEXT:
 - Lead's first name: {first_name}
@@ -232,12 +246,12 @@ PROPERTY DATA (from fact sheet — use ONLY this data, do NOT invent any facts):
 STRUCTURE (follow exactly):
 1. Greeting: "Hey {first_name},"
 2. Body: 3-4 sentences. Acknowledge their interest warmly. Ask what specific information they'd like (tour, OM, financials, etc.). Mention your direct line.
-3. Signoff: Use exactly: {signoff}
 
 RULES:
 - Do NOT include a subject line
 - Do NOT invent property details not listed above
 - Stay on topic — respond to what they said
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
 - Write ONLY the email body text"""
 
     elif response_type == "want_something":
@@ -274,7 +288,6 @@ RULES:
 SENDER IDENTITY:
 - You are {sender_name} from Resource Realty Group
 - Your direct line: {phone}
-- Signoff: {signoff}
 
 LEAD CONTEXT:
 - Lead's first name: {first_name}
@@ -296,7 +309,6 @@ MARKET STATUS & BROCHURE ACCESS:
 STRUCTURE (follow exactly):
 1. Greeting: "Hey {first_name},"
 2. Body: 3-5 sentences. Address ONLY what they asked for. If the data is in the property info above, include it. If it's NOT above, say "Let me check on that and get back to you."
-3. Signoff: Use exactly: {signoff}
 
 RULES:
 - Do NOT include a subject line
@@ -305,6 +317,7 @@ RULES:
 - If they want a tour, offer to schedule and ask for preferred date/time
 - If they want financials and don't have NDA, mention NDA requirement
 - If they want documents we have, say you'll send them over
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
 - Write ONLY the email body text"""
 
     elif response_type == "lead_magnet_redirect":
@@ -313,7 +326,6 @@ RULES:
 SENDER IDENTITY:
 - You are {sender_name} from Resource Realty Group
 - Your direct line: {phone}
-- Signoff: {signoff}
 
 LEAD CONTEXT:
 - Lead's first name: {first_name}
@@ -323,16 +335,16 @@ LEAD CONTEXT:
 STRUCTURE (follow exactly):
 1. Greeting: "Hey {first_name},"
 2. Body: 3-4 sentences. Acknowledge their interest. Let them know that property is no longer available. Mention you have similar properties and off-market opportunities. Offer to send info or set up a call.
-3. Signoff: Use exactly: {signoff}
 
 RULES:
 - Do NOT include a subject line
 - Do NOT make up details about other properties
 - Do NOT apologize excessively — keep it positive and forward-looking
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
 - Write ONLY the email body text"""
 
     else:
-        return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions about the property, don't hesitate to reach out. My direct line is {phone}.\n\n{signoff}"
+        return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions about the property, don't hesitate to reach out. My direct line is {phone}."
 
     try:
         result = subprocess.run(
@@ -355,7 +367,7 @@ RULES:
         return body
     except Exception as e:
         # Fallback to simple template
-        return f"Hey {first_name},\n\nThanks for getting back to me! I'd love to help. My direct line is {phone} — feel free to call anytime.\n\n{signoff}"
+        return f"Hey {first_name},\n\nThanks for getting back to me! I'd love to help. My direct line is {phone} — feel free to call anytime."
 
 
 def main(classify_result: dict):
@@ -446,6 +458,16 @@ def main(classify_result: dict):
 
     # ===== ACTIONABLE: Generate response draft =====
 
+    # Load signer config once for all signer lookups in this execution
+    try:
+        sig_config = get_signer_config()
+    except Exception:
+        sig_config = {}
+
+    # Determine signer for prompt generation, HTML signature on draft, and SMS
+    template_used = classify_result.get("template_used", "")
+    sender_name, sender_phone, html_signature = determine_signer(source, template_used, sig_config)
+
     # Determine response type
     if cls == "NOT_INTERESTED":
         response_type = "not_interested"
@@ -460,7 +482,7 @@ def main(classify_result: dict):
         response_type = "lead_magnet_redirect"
 
     # Generate response body with Claude
-    response_body = generate_response_with_claude(classify_result, response_type)
+    response_body = generate_response_with_claude(classify_result, response_type, sender_name, sender_phone)
 
     # Create Gmail draft as reply in the same thread
     try:
@@ -469,7 +491,8 @@ def main(classify_result: dict):
             subject=reply_subject,
             body=response_body,
             thread_id=thread_id,
-            in_reply_to=in_reply_to
+            in_reply_to=in_reply_to,
+            html_signature=html_signature
         )
 
         draft = {
@@ -499,9 +522,8 @@ def main(classify_result: dict):
         reply_channel = classify_result.get("reply_channel", "email")
         sms_body = None
         if reply_channel == "sms" and cls == "INTERESTED" and lead_phone:
-            signer_name, signer_phone, _ = determine_signer(source, classify_result.get("template_used", ""))
             first_name = lead_name.split()[0] if lead_name else "there"
-            sms_body = f"Hey {first_name}, {signer_name} from Resource Realty Group here. Just sent you a reply about {prop_names}. My direct line is {signer_phone} if you'd rather chat by phone."
+            sms_body = f"Hey {first_name}, {sender_name} from Resource Realty Group here. Just sent you a reply about {prop_names}. My direct line is {sender_phone} if you'd rather chat by phone."
         draft["sms_body"] = sms_body
         draft["reply_channel"] = reply_channel
 

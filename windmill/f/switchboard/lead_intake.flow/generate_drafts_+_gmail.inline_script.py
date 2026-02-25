@@ -10,6 +10,7 @@
 #google-auth
 
 import wmill
+import json
 import base64
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
@@ -144,7 +145,7 @@ def format_property_list_inline(properties):
         return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
-def create_gmail_draft(oauth, to_email, subject, body, cc=None):
+def create_gmail_draft(oauth, to_email, subject, body, cc=None, html_signature=""):
     """Create a Gmail draft. Single API call — no custom headers.
 
     Gmail strips custom X- headers when sending, so we don't set any.
@@ -160,6 +161,8 @@ def create_gmail_draft(oauth, to_email, subject, body, cc=None):
     service = build('gmail', 'v1', credentials=creds)
 
     html_body = body.replace('\n', '<br>')
+    if html_signature:
+        html_body = html_body + '<br><br>' + html_signature
     message = MIMEText(html_body, 'html')
     message['to'] = to_email
     message['subject'] = subject
@@ -178,13 +181,43 @@ def create_gmail_draft(oauth, to_email, subject, body, cc=None):
     }
 
 
+def get_html_signature(source, template_used, sig_config):
+    """Look up the HTML signature for a given source/template from the signer config."""
+    signers = sig_config.get("signers", {})
+    if not signers:
+        return ""
+
+    # Check template_used first (in-flight thread continuity)
+    for prefix, signer_key in sig_config.get("template_prefix_to_signer", {}).items():
+        if template_used == prefix or template_used.startswith(prefix):
+            signer = signers.get(signer_key, {})
+            if signer:
+                return signer.get("html_signature", "")
+
+    # Fall back to source classification
+    src = source.lower()
+    for group in sig_config.get("source_to_signer", {}).values():
+        if src in group["sources"]:
+            signer = signers.get(group["signer"], {})
+            if signer:
+                return signer.get("html_signature", "")
+
+    # Default
+    default_key = sig_config.get("default_signer", "larry")
+    return signers.get(default_key, {}).get("html_signature", "")
+
+
 def main(grouped_data: dict):
     standard_leads = grouped_data.get("standard_leads", [])
     info_requests = grouped_data.get("info_requests", [])
     drafts = []
 
-    # Get Gmail OAuth credentials
+    # Get Gmail OAuth credentials and signer config
     gmail_oauth = wmill.get_resource("f/switchboard/gmail_oauth")
+    try:
+        sig_config = json.loads(wmill.get_variable("f/switchboard/email_signatures"))
+    except Exception:
+        sig_config = {}
 
     for lead in standard_leads:
         first_name = get_first_name(lead["name"])
@@ -222,7 +255,7 @@ def main(grouped_data: dict):
             prop = properties[0] if properties else {}
             addr = prop.get("property_address") or prop.get("canonical_name", "your property")
             draft["email_subject"] = f"Re: Realtor.com Inquiry-- {addr}"
-            draft["email_body"] = f"Hey {first_name},\n\nI received your Realtor.com inquiry about {addr}. Are you looking to take a tour? Or is there something else I can help you with?\n\nAll The Best,\nJake"
+            draft["email_body"] = f"Hey {first_name},\n\nI received your Realtor.com inquiry about {addr}. Are you looking to take a tour? Or is there something else I can help you with?"
             draft["sms_body"] = f"Hey {first_name}, this is Jake from Resource Realty Group. I received your Realtor.com inquiry about {addr}. Would you like to take a tour? Or is there something else I can help you with?" if phone else None
             draft["template_used"] = "realtor_com"
 
@@ -232,7 +265,7 @@ def main(grouped_data: dict):
             addr = prop.get("property_address") or prop.get("canonical_name", "your property")
             city = addr.split(",")[1].strip() if "," in addr else "your area"
             draft["email_subject"] = f"Re: Your Property at {addr}"
-            draft["email_body"] = f"Hey {first_name},\n\nI heard you might be interested in selling your place at {addr}. Is there a good time we can talk? I think I can help you.\n\nAll The Best,\nJake"
+            draft["email_body"] = f"Hey {first_name},\n\nI heard you might be interested in selling your place at {addr}. Is there a good time we can talk? I think I can help you."
             draft["sms_body"] = f"Hey {first_name}, this is Jake from Resource Realty Group. I heard you might be looking to sell your home in {city}. Is that accurate?" if phone else None
             draft["template_used"] = "seller_hub"
 
@@ -242,7 +275,7 @@ def main(grouped_data: dict):
             canonical = magnet.get("canonical_name", "")
             addr = magnet.get("property_address") or canonical
             draft["email_subject"] = f"RE: Your Interest in {canonical}"
-            draft["email_body"] = f"Hey {first_name},\n\nI got your information when you checked out my listing for {addr}. That property is no longer available, but we have some similar properties that might be a good fit depending on what you're looking for.\n\nIf you'd like to check out what we have, just let me know and I can send over some information. We also have some off-market properties that would require an NDA to be signed.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns.\n\nTalk soon,\nLarry"
+            draft["email_body"] = f"Hey {first_name},\n\nI got your information when you checked out my listing for {addr}. That property is no longer available, but we have some similar properties that might be a good fit depending on what you're looking for.\n\nIf you'd like to check out what we have, just let me know and I can send over some information. We also have some off-market properties that would require an NDA to be signed.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns."
             draft["sms_body"] = f"Hey {first_name}, this is Larry from Resource Realty Group. I saw you checked out {canonical}. That one's no longer available, but I have some similar properties. Let me know if you're interested! My direct line is (734) 732-3789." if phone else None
             draft["template_used"] = "lead_magnet"
 
@@ -253,14 +286,14 @@ def main(grouped_data: dict):
                 if is_followup:
                     # 4. commercial_multi_property_followup
                     draft["email_subject"] = "RE: Your Interest in Multiple Properties"
-                    draft["email_body"] = f"Hey {first_name},\n\nI see you checked out a few more of my listings. If you'd like to check out more information on any of these, just let me know and I'll send over the OMs.\n\nTalk soon,\nLarry"
+                    draft["email_body"] = f"Hey {first_name},\n\nI see you checked out a few more of my listings. If you'd like to check out more information on any of these, just let me know and I'll send over the OMs."
                     draft["sms_body"] = f"Hey {first_name}, I see you checked out a few more of my listings. Let me know if you'd like the OMs on any of them! - Larry" if phone else None
                     draft["template_used"] = "commercial_multi_property_followup"
                 else:
                     # 5. commercial_multi_property_first_contact
                     prop_text = format_property_list_inline(non_magnet_props or properties)
                     draft["email_subject"] = "RE: Your Interest in Multiple Properties"
-                    draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out {prop_text}.\n\nIf you'd like to check out more information on any of these, just let me know and I'll send over the OMs.\n\nAlternatively, we also have some off-market properties that might be a good fit, depending on what you're looking for. They would require an NDA to be signed, so just let me know and I can send one over to you.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns.\n\nTalk soon,\nLarry"
+                    draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out {prop_text}.\n\nIf you'd like to check out more information on any of these, just let me know and I'll send over the OMs.\n\nAlternatively, we also have some off-market properties that might be a good fit, depending on what you're looking for. They would require an NDA to be signed, so just let me know and I can send one over to you.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns."
                     draft["sms_body"] = f"Hey {first_name}, this is Larry from Resource Realty Group. I saw you checked out a few of my properties on {source}. Let me know if you'd like more info on any of them! My direct line is (734) 732-3789." if phone else None
                     draft["template_used"] = "commercial_multi_property_first_contact"
             else:
@@ -271,19 +304,22 @@ def main(grouped_data: dict):
                 if is_followup:
                     # 6. commercial_followup_template
                     draft["email_subject"] = f"RE: Your Interest in {canonical}"
-                    draft["email_body"] = f"Hey {first_name},\n\nI see you checked out another property - {addr}.\n\nIf you'd like to check out more information on this one, just let me know and I'll send over the OM.\n\nTalk soon,\nLarry"
+                    draft["email_body"] = f"Hey {first_name},\n\nI see you checked out another property - {addr}.\n\nIf you'd like to check out more information on this one, just let me know and I'll send over the OM."
                     draft["sms_body"] = f"Hey {first_name}, I see you checked out another property - {addr}. Let me know if you'd like the OM on this one! - Larry" if phone else None
                     draft["template_used"] = "commercial_followup_template"
                 else:
                     # 7. commercial_first_outreach_template
                     draft["email_subject"] = f"RE: Your Interest in {canonical}"
-                    draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out my property, {addr}.\n\nIf you'd like to check out more information, just let me know and I'll send over the OM so you can check it out.\n\nAlternatively, we also have some off-market properties that might be a good fit, depending on what you're looking for. They would require an NDA to be signed, so just let me know and I can send one over to you.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns.\n\nTalk soon,\nLarry"
+                    draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out my property, {addr}.\n\nIf you'd like to check out more information, just let me know and I'll send over the OM so you can check it out.\n\nAlternatively, we also have some off-market properties that might be a good fit, depending on what you're looking for. They would require an NDA to be signed, so just let me know and I can send one over to you.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns."
                     draft["sms_body"] = f"Hey {first_name}, this is Larry from Resource Realty Group. I got your information off of {source} when you checked out my property, {addr}. If you'd like more info, just let me know and I'll send over the OM. My direct line is (734) 732-3789." if phone else None
                     draft["template_used"] = "commercial_first_outreach_template"
 
         # 8. Unknown source type — skip (no draft)
         else:
             continue
+
+        # Look up HTML signature for this draft's source/template
+        draft["html_signature"] = get_html_signature(source, draft.get("template_used", ""), sig_config)
 
         drafts.append(draft)
 
@@ -295,7 +331,8 @@ def main(grouped_data: dict):
                 draft["email"],
                 draft["email_subject"],
                 draft["email_body"],
-                cc=draft.get("cc")
+                cc=draft.get("cc"),
+                html_signature=draft.get("html_signature", "")
             )
 
             # Store Gmail draft info (thread_id is used for SENT matching)
@@ -312,6 +349,9 @@ def main(grouped_data: dict):
             draft["draft_created_at"] = datetime.now(timezone.utc).isoformat()
             draft["draft_creation_success"] = False
             draft["draft_creation_error"] = str(e)
+
+        # Remove html_signature from draft — already baked into the Gmail draft
+        draft.pop("html_signature", None)
 
     # Generate summary
     new_count = sum(1 for d in drafts if d.get("is_new"))
