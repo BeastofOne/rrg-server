@@ -115,7 +115,8 @@ def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None):
     )
     service = build('gmail', 'v1', credentials=creds)
 
-    message = MIMEText(body)
+    html_body = body.replace('\n', '<br>')
+    message = MIMEText(html_body, 'html')
     message['to'] = to_email
     message['subject'] = subject if subject.lower().startswith('re:') else f'Re: {subject}'
     if in_reply_to:

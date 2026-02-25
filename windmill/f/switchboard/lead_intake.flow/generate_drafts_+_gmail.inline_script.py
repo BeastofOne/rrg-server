@@ -159,7 +159,8 @@ def create_gmail_draft(oauth, to_email, subject, body, cc=None):
     )
     service = build('gmail', 'v1', credentials=creds)
 
-    message = MIMEText(body)
+    html_body = body.replace('\n', '<br>')
+    message = MIMEText(html_body, 'html')
     message['to'] = to_email
     message['subject'] = subject
     if cc:
