@@ -159,10 +159,10 @@ Fundamentally different from all other lead types:
 
 ### Lead Conversation for Residential (Option C Architecture)
 
-Same `lead_conversation` flow, not a separate workflow. Branched by `lead_type`:
+Same `lead_conversation` flow, not a separate workflow. Branched by `source` (already stored in signal from lead_intake, no reclassification needed):
 
-- **Module A (classify):** Picks classification prompt based on `lead_type` (commercial buyer vs residential buyer vs residential seller)
-- **Module B (generate response):** Picks template/prompt framework based on `lead_type`
+- **Module A (classify):** Picks classification prompt based on `source` (commercial vs residential buyer vs residential seller)
+- **Module B (generate response):** Picks template/prompt framework based on `source`. Reads `template_used` from signal for signer continuity on in-flight threads.
 - **Everything else shared:** Draft creation, approval gate, CRM notes, post-approval
 
 Seller conversation categories still map to same structure (INTERESTED, WANT_SOMETHING, NOT_INTERESTED, etc.) but the prompt is tuned for seller context ("what's your commission?" vs "send me the OM").
@@ -186,12 +186,12 @@ Trigger real test leads from LoopNet and BizBuySell through the full pipeline af
 
 | Risk | Mitigation |
 |------|------------|
-| Old threads signed by Jake, new replies come from Andrea | In-flight threads keep original signer. Store signer in signal at outreach time; lead_conversation reads signer from signal for thread continuity. |
+| Old threads signed by Jake, new replies come from Andrea | In-flight threads keep original signer. `template_used` field already stored in signal at outreach time; lead_conversation reads it to determine who signed the original outreach and maintain continuity. |
 | Phase 2 prompts reference fact sheet data that barely exists | Option B: prompts gracefully handle missing data ("I'll check on that and get back to you"). Point at online master sheet as interim data source. Gets richer as fact sheets are populated. |
 | Phase 2 and Phase 3 both touch template selection branching | Design three-way split (commercial / residential / unknown) from the start in Phase 2, even if residential branch is empty. Phase 3 fills it in. |
-| `lead_type` derivation needs `source` to survive webhook → intake → signal → conversation | Verify source field preservation during Phase 1 testing. Currently stored in jake_signals and passed through. |
-| Realtor.com fast-path changes the webhook architecture | Design in Phase 3, be aware it touches webhook code that Phase 1 validates. |
-| Source classification logic (`is_commercial`) duplicated across multiple files | Centralize into shared Windmill variable or utility. Single source of truth for which sources are commercial, residential buyer, residential seller. |
+| Branching by source (not lead_type) — `source` must survive webhook → intake → signal → conversation | Already works: `find_outreach_by_thread()` reads `source` and `source_type` from stored signal draft. Verify during Phase 1. |
+| Realtor.com fast-path changes the webhook architecture | Option B: make lead_intake handle single-lead immediate processing when source is Realtor.com. Design in Phase 3, be aware it touches webhook code. |
+| Source classification logic (`is_commercial`) duplicated across lead_intake and lead_conversation | Not a structural problem — source is only identified once (webhook parser), stored in signal. The check in each module just reads the stored source. Keep the string lists matching when adding residential sources. |
 
 ### Interim Data Source for Property Facts
 
