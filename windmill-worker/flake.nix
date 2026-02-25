@@ -17,7 +17,7 @@
       windmillBase = pkgs.dockerTools.pullImage {
         imageName = "ghcr.io/windmill-labs/windmill";
         imageDigest = "sha256:6594f2ae765a5c49ee74490e6bdbd9d55f0ef1c83ddec570c3c51bf5bea7d281";
-        sha256 = "";  # discover on first build
+        sha256 = "sha256-kLGdmVIsiSZjC5Iga6KhJxJp9TCPcqmTy0g1xR+Ha88=";
         finalImageTag = "main";
       };
 
