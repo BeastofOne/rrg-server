@@ -19,6 +19,7 @@
 import wmill
 import json
 import re
+import subprocess
 import base64
 import requests
 import psycopg2
@@ -246,16 +247,19 @@ Write ONLY the email body text, nothing else."""
     else:
         return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions about the property, don't hesitate to reach out. My direct line is {phone}.\n\n{signoff}"
 
-    endpoint_url = wmill.get_variable("f/switchboard/claude_endpoint_url")
-
     try:
-        resp = requests.post(
-            endpoint_url,
-            json={"prompt": prompt, "model": "haiku"},
-            timeout=90
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--model", "haiku", "--no-chrome", "--allowedTools", ""],
+            capture_output=True,
+            text=True,
+            timeout=90,
         )
-        resp.raise_for_status()
-        body = resp.json().get("response", "").strip()
+
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"Claude CLI exited with code {result.returncode}"
+            raise RuntimeError(error_msg)
+
+        body = result.stdout.strip()
         # Remove any markdown fences Claude might add
         if body.startswith("```"):
             body = re.sub(r'^```\w*\s*', '', body)
