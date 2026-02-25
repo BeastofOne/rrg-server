@@ -182,69 +182,119 @@ def generate_response_with_claude(classify_result, response_type):
     docs_text = "\n".join(f"  - {d}" for d in docs_available) if docs_available else "  (no documents pre-loaded for this property)"
 
     if response_type == "not_interested":
-        prompt = f"""Write a brief, professional email reply to a lead who has indicated they are NOT interested in the property.
+        prompt = f"""Write a brief email reply to a lead who is not interested.
 
-Lead's name: {first_name}
-Their reply: {reply_body[:500]}
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Signoff: {signoff}
 
-Rules:
-- Be gracious and brief (2-3 sentences max)
-- Don't be pushy or try to change their mind
-- Leave the door open for future contact
-- Sign off as {sender_name}
-- Use signoff: {signoff}
-- Do NOT include a subject line — just the body
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- Their reply: {reply_body[:500]}
 
-Write ONLY the email body text, nothing else."""
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 2-3 sentences max. Be gracious, don't be pushy, don't try to change their mind. Leave the door open for future contact.
+3. Signoff: Use exactly: {signoff}
+
+RULES:
+- Do NOT include a subject line
+- Do NOT mention any property details or pricing
+- Do NOT suggest alternative properties
+- Write ONLY the email body text"""
 
     elif response_type == "general_interest":
-        prompt = f"""Write a brief, professional email reply to a lead who has shown general interest but hasn't asked for anything specific.
+        prompt = f"""Write a brief email reply to a lead who has shown general interest but hasn't asked for anything specific.
 
-Lead's name: {first_name}
-Property:
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+- Signoff: {signoff}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- Their reply: {reply_body[:500]}
+
+PROPERTY DATA (from fact sheet — use ONLY this data, do NOT invent any facts):
 {prop_text}
-Their reply: {reply_body[:500]}
 
-Rules:
-- Acknowledge their interest warmly
-- Ask what specific information they'd like (tour, OM, financials, etc.)
-- Mention your direct line: {phone}
-- Keep it brief (3-4 sentences)
-- Sign off as {sender_name}
-- Use signoff: {signoff}
-- Do NOT include a subject line — just the body
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-4 sentences. Acknowledge their interest warmly. Ask what specific information they'd like (tour, OM, financials, etc.). Mention your direct line.
+3. Signoff: Use exactly: {signoff}
 
-Write ONLY the email body text, nothing else."""
+RULES:
+- Do NOT include a subject line
+- Do NOT invent property details not listed above
+- Stay on topic — respond to what they said
+- Write ONLY the email body text"""
 
     elif response_type == "want_something":
-        # Build what they want vs what we have
         wants_text = ", ".join(wants) if wants else "unspecified information"
 
-        prompt = f"""Write a brief, professional email reply to a lead who has asked for specific information.
+        # Build NDA context
+        if not has_nda:
+            nda_context = "The lead has NOT signed an NDA. If they ask for financials, rent roll, or T12, tell them these require an NDA and offer to send one."
+        else:
+            nda_context = "The lead HAS signed an NDA. Financials can be shared."
 
-Lead's name: {first_name}
-Property:
+        # Build market status context per property
+        market_context = []
+        for p in properties:
+            status = p.get("market_status", "unknown")
+            has_fin = p.get("brochure_has_financials", False)
+            name = p.get("canonical_name", "the property")
+            if status == "off-market":
+                if has_nda:
+                    market_context.append(f"- {name}: Off-market. NDA signed — can share full brochure and financials.")
+                else:
+                    market_context.append(f"- {name}: Off-market. No NDA — can share redacted brochure only. Financials require NDA.")
+            elif status == "on-market":
+                if has_fin and not has_nda:
+                    market_context.append(f"- {name}: On-market. Brochure contains financials — NDA required to share.")
+                else:
+                    market_context.append(f"- {name}: On-market. Brochure can be shared freely.")
+            else:
+                market_context.append(f"- {name}: Market status unknown.")
+        market_text = "\n".join(market_context) if market_context else "  (no market status data)"
+
+        prompt = f"""Write a brief email reply to a lead who has asked for specific information.
+
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+- Signoff: {signoff}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- What they asked for: {wants_text}
+- Their reply: {reply_body[:500]}
+
+PROPERTY DATA (from fact sheet — use ONLY this data, do NOT invent any facts):
 {prop_text}
-What they asked for: {wants_text}
-Their reply: {reply_body[:500]}
-NDA on file: {has_nda}
-Documents we have available:
+
+AVAILABLE DOCUMENTS:
 {docs_text}
 
-Rules:
-- Address what they asked for directly
-- If they want financials/rent_roll/t12 and DON'T have NDA: mention that financials require an NDA and offer to send one
-- If they want financials and DO have NDA: say you'll send them over (the actual docs will be attached separately)
-- If they want a tour: offer to schedule, ask for preferred date/time
-- If they want info we have (OM, brochure, price, zoning, size): provide it or say you'll send it
-- If they want info we DON'T have: say you'll check and get back to them
-- Mention your direct line: {phone}
-- Keep it concise (3-5 sentences)
-- Sign off as {sender_name}
-- Use signoff: {signoff}
-- Do NOT include a subject line — just the body
+NDA STATUS:
+{nda_context}
 
-Write ONLY the email body text, nothing else."""
+MARKET STATUS & BROCHURE ACCESS:
+{market_text}
+
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-5 sentences. Address ONLY what they asked for. If the data is in the property info above, include it. If it's NOT above, say "Let me check on that and get back to you."
+3. Signoff: Use exactly: {signoff}
+
+RULES:
+- Do NOT include a subject line
+- Do NOT invent numbers, prices, or facts not listed in PROPERTY DATA
+- Stay on topic — if they asked about price, don't talk about tours
+- If they want a tour, offer to schedule and ask for preferred date/time
+- If they want financials and don't have NDA, mention NDA requirement
+- If they want documents we have, say you'll send them over
+- Write ONLY the email body text"""
 
     else:
         return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions about the property, don't hesitate to reach out. My direct line is {phone}.\n\n{signoff}"
