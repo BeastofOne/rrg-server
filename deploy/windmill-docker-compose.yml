@@ -30,20 +30,24 @@ services:
         condition: service_healthy
 
   windmill_worker:
-    image: ghcr.io/windmill-labs/windmill:main
+    image: windmill-worker:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD env var must be set}@db/windmill?sslmode=disable
       RUST_LOG: info
-      DISABLE_SERVER: true
-      KEEP_JOB_DIR: false
-      METRICS_ADDR: false
+      DISABLE_SERVER: "true"
+      KEEP_JOB_DIR: "false"
+      METRICS_ADDR: "false"
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-haiku}
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - worker_dependency_cache:/tmp/windmill/cache
+    tmpfs:
+      - /root/.claude:rw,size=50m
 
 volumes:
   windmill_db:
