@@ -10,6 +10,7 @@
 
 import wmill
 import json
+import os
 import re
 import subprocess
 import base64
@@ -148,6 +149,7 @@ Respond with ONLY valid JSON (no markdown fences, no explanation outside the JSO
             capture_output=True,
             text=True,
             timeout=90,
+            env=os.environ.copy(),
         )
 
         if result.returncode != 0:

@@ -18,6 +18,7 @@
 
 import wmill
 import json
+import os
 import re
 import subprocess
 import base64
@@ -253,6 +254,7 @@ Write ONLY the email body text, nothing else."""
             capture_output=True,
             text=True,
             timeout=90,
+            env=os.environ.copy(),
         )
 
         if result.returncode != 0:
