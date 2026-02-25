@@ -135,6 +135,24 @@ def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None):
     }
 
 
+def determine_signer(source, template_used):
+    """Determine sender name, phone, and signoff based on source and template continuity."""
+    is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
+    is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
+    is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
+
+    if template_used.startswith("commercial_") or template_used == "lead_magnet":
+        return "Larry", "(734) 732-3789", "Talk soon,\nLarry"
+    elif template_used.startswith("residential_"):
+        return "Andrea", "ANDREA_PHONE_TBD", "ANDREA_SIGNOFF_TBD"
+    elif is_commercial:
+        return "Larry", "(734) 732-3789", "Talk soon,\nLarry"
+    elif is_residential_buyer or is_residential_seller:
+        return "Andrea", "ANDREA_PHONE_TBD", "ANDREA_SIGNOFF_TBD"
+    else:
+        return "Larry", "(734) 732-3789", "Talk soon,\nLarry"
+
+
 def generate_response_with_claude(classify_result, response_type):
     """Use Claude to generate a contextual email response."""
     lead_name = classify_result.get("lead_name", "")
@@ -147,37 +165,9 @@ def generate_response_with_claude(classify_result, response_type):
     wants = classification.get("wants", []) or []
     reply_body = classify_result.get("reply_body", "")
 
-    # Source classification
-    is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
-    is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
-    is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
-
-    # Determine signer — check template_used for in-flight thread continuity
+    # Determine signer from source + template_used
     template_used = classify_result.get("template_used", "")
-    if template_used.startswith("commercial_") or template_used == "lead_magnet":
-        # In-flight thread — keep Larry
-        signoff = "Talk soon,\nLarry"
-        phone = "(734) 732-3789"
-        sender_name = "Larry"
-    elif template_used.startswith("residential_"):
-        # In-flight thread — keep Andrea
-        signoff = "ANDREA_SIGNOFF_TBD"
-        phone = "ANDREA_PHONE_TBD"
-        sender_name = "Andrea"
-    elif is_commercial:
-        signoff = "Talk soon,\nLarry"
-        phone = "(734) 732-3789"
-        sender_name = "Larry"
-    elif is_residential_buyer or is_residential_seller:
-        # Placeholder — will be filled in Phase 3 with Andrea's details
-        signoff = "ANDREA_SIGNOFF_TBD"
-        phone = "ANDREA_PHONE_TBD"
-        sender_name = "Andrea"
-    else:
-        # Unknown source — default to Larry for now
-        signoff = "Talk soon,\nLarry"
-        phone = "(734) 732-3789"
-        sender_name = "Larry"
+    sender_name, phone, signoff = determine_signer(source, template_used)
 
     # Build property context
     prop_details = []
@@ -509,8 +499,9 @@ def main(classify_result: dict):
         reply_channel = classify_result.get("reply_channel", "email")
         sms_body = None
         if reply_channel == "sms" and cls == "INTERESTED" and lead_phone:
+            signer_name, signer_phone, _ = determine_signer(source, classify_result.get("template_used", ""))
             first_name = lead_name.split()[0] if lead_name else "there"
-            sms_body = f"Hey {first_name}, {sender_name} from Resource Realty Group here. Just sent you a reply about {prop_names}. My direct line is {phone} if you'd rather chat by phone."
+            sms_body = f"Hey {first_name}, {signer_name} from Resource Realty Group here. Just sent you a reply about {prop_names}. My direct line is {signer_phone} if you'd rather chat by phone."
         draft["sms_body"] = sms_body
         draft["reply_channel"] = reply_channel
 
