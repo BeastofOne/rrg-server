@@ -317,6 +317,30 @@ RULES:
 - If they want documents we have, say you'll send them over
 - Write ONLY the email body text"""
 
+    elif response_type == "lead_magnet_redirect":
+        prompt = f"""Write a brief email reply to a lead who is responding about a property that is no longer available (lead magnet listing).
+
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+- Signoff: {signoff}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- Property they asked about: {prop_text}
+- Their reply: {reply_body[:500]}
+
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-4 sentences. Acknowledge their interest. Let them know that property is no longer available. Mention you have similar properties and off-market opportunities. Offer to send info or set up a call.
+3. Signoff: Use exactly: {signoff}
+
+RULES:
+- Do NOT include a subject line
+- Do NOT make up details about other properties
+- Do NOT apologize excessively — keep it positive and forward-looking
+- Write ONLY the email body text"""
+
     else:
         return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions about the property, don't hesitate to reach out. My direct line is {phone}.\n\n{signoff}"
 
@@ -439,6 +463,11 @@ def main(classify_result: dict):
         response_type = "want_something"
     else:
         response_type = "general_interest"
+
+    # Check if this is a lead magnet property — redirect toward active listings
+    is_lead_magnet = any(p.get("lead_magnet", False) for p in properties)
+    if is_lead_magnet:
+        response_type = "lead_magnet_redirect"
 
     # Generate response body with Claude
     response_body = generate_response_with_claude(classify_result, response_type)
