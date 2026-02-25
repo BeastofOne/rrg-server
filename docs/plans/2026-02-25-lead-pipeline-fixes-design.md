@@ -58,7 +58,7 @@ Code at lines 151-159 of `generate_response_draft.inline_script.py` already has 
 | BizBuySell | (no real data yet) | YES (expected) | Yes |
 | Realtor.com | realtor.com | NO | Yes |
 | Seller Hub | seller hub | NO | Yes |
-| Social Connect | social connect | NO | Edge case — not in any three-way category yet |
+| Social Connect | social connect | NO | Same as Seller Hub — needs mapping in three-way split (Task 6) |
 
 **Real signal data verified:**
 - Signal 61: `source=Crexi`, `source_type=crexi_om`, `template_used=commercial_first_outreach_template`
@@ -158,7 +158,7 @@ Jake is fully out of the residential pipeline. All residential leads signed by A
 ```python
 is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
 is_residential_buyer = source.lower() in ("realtor.com", "homes.com")
-is_residential_seller = source.lower() in ("upnest", "seller_hub", "top_producer")
+is_residential_seller = source.lower() in ("upnest", "seller hub", "seller_hub", "top_producer", "social connect")
 ```
 
 ### Realtor.com — Fast-Path Buyer Leads
