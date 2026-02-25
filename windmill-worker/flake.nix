@@ -28,17 +28,19 @@
       '';
 
     in {
-      packages.${system}.dockerImage = pkgs.dockerTools.buildLayeredImage {
-        name = "windmill-worker";
-        tag = "latest";
-        fromImage = windmillBase;
-        contents = [
-          pkgs.claude-code
-          pkgs.cacert
-          claudeLink
-        ];
-      };
+      packages.${system} = rec {
+        dockerImage = pkgs.dockerTools.buildLayeredImage {
+          name = "windmill-worker";
+          tag = "latest";
+          fromImage = windmillBase;
+          contents = [
+            pkgs.claude-code
+            pkgs.cacert
+            claudeLink
+          ];
+        };
 
-      packages.${system}.default = self.packages.${system}.dockerImage;
+        default = dockerImage;
+      };
     };
 }
