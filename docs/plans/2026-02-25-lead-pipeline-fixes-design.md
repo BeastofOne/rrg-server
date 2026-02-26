@@ -203,6 +203,42 @@ Seller conversation categories still map to same structure (INTERESTED, WANT_SOM
 
 ---
 
+## Phase 3 Verification Results (Feb 26, 2026)
+
+All tests triggered via Windmill API (`run/f/f/switchboard/lead_intake` and `lead_conversation`).
+
+### Seller Hub (residential seller)
+- Template: `residential_seller` ✓
+- Signer: Andrea (phone: (734) 223-1015) ✓
+- Subject: "Introductions, Selling your home?" ✓
+- Draft created in Gmail ✓
+- SMS body generated ✓
+- `get_first_name` fallback to "there" for unknown names (expected) ✓
+
+### Realtor.com (residential buyer)
+- Template: `realtor_com` ✓
+- Signer: Andrea (phone: (734) 223-1015) ✓
+- First name "Sarah" correctly parsed ✓
+- Subject includes property address ✓
+- Draft created in Gmail ✓
+- SMS body generated ✓
+
+### Residential conversation reply (Seller Hub → WANT_SOMETHING)
+- Classification: `INTERESTED / WANT_SOMETHING` ✓
+- Wants: `["commission"]` — correctly identified ✓
+- Response type: `want_something` ✓
+- Response uses seller-appropriate language ✓
+- Signer: Andrea via `template_prefix_to_signer` ("residential_" → "andrea") ✓
+- Draft created in Gmail with HTML signature ✓
+
+### In-flight thread continuity (Crexi → commercial template)
+- `template_used = "commercial_first_outreach_template"` preserved from original outreach ✓
+- `determine_signer()` matches prefix `"commercial_"` → Larry ✓
+- Response references property data correctly ✓
+- Draft created in Gmail with Larry's HTML signature ✓
+
+---
+
 ## Phase 4: LoopNet & BizBuySell Testing (Issue 3)
 
 Trigger real test leads from LoopNet and BizBuySell through the full pipeline after Phases 1-2 are complete. Same E2E testing approach as the Crexi testing done earlier today. No code changes expected — just test runs and bug fixing whatever comes up.
