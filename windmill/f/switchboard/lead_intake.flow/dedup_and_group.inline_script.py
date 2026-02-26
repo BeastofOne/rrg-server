@@ -24,7 +24,7 @@ def main(leads: list):
         if not email:
             continue
         if email not in groups:
-            groups[email] = {"name": lead["name"], "email": email, "phone": lead.get("phone", ""), "source": lead.get("source", ""), "source_type": lead.get("source_type", ""), "is_new": lead.get("is_new", True), "has_nda": lead.get("has_nda", False), "is_followup": lead.get("is_followup", False), "wiseagent_client_id": lead.get("wiseagent_client_id"), "properties": [], "notification_message_ids": []}
+            groups[email] = {"name": lead["name"], "email": email, "phone": lead.get("phone", ""), "source": lead.get("source", ""), "source_type": lead.get("source_type", ""), "is_new": lead.get("is_new", True), "has_nda": lead.get("has_nda", False), "is_followup": lead.get("is_followup", False), "wiseagent_client_id": lead.get("wiseagent_client_id"), "lead_type": lead.get("lead_type", ""), "city": lead.get("city", ""), "properties": [], "notification_message_ids": []}
         # Deduplicate properties by property_name — different actions on the same
         # property (OM + CA + flyer) should not count as multiple properties.
         # Also handles Crexi name variants: "Name" vs "Name in City".

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Execute 28 end-to-end tests covering every branch of lead_intake and lead_conversation, fixing issues as they're found.
+**Goal:** Execute 29 end-to-end tests (+ 3 setup tasks) covering every branch of lead_intake and lead_conversation, fixing issues as they're found.
 
 **Architecture:** Seed real notification emails into leads@ via Gmail API `messages.import`, let Pub/Sub naturally trigger the webhook, verify drafts in teamgotcher@, Jake manually approves/rejects, verify CRM + SMS. One test at a time, fix before moving on.
 
@@ -27,6 +27,36 @@
 **Property for commercial tests:** `1480 Parkwood Ave - Ypsilanti` (canonical name, exists in property_mapping).
 
 **Second property for multi-property tests:** `CMC Transportation - Ypsilanti` (exists in property_mapping).
+
+---
+
+## Pre-Flight Checks (Before Any Tests)
+
+Run these before starting Task 1:
+
+1. **Verify `messages.import` triggers Pub/Sub:** Seed a throwaway email into leads@ and confirm the webhook fires within ~15 seconds. If it doesn't, switch to `messages.insert` with `internalDateSource=receivedTime` and explicit `INBOX` label ID.
+
+2. **Verify SMS gateway is reachable:** `curl -s http://100.125.176.16:8686/` — if unreachable, SMS tests will fail.
+
+3. **Verify WiseAgent OAuth token:** Make a test API call to WiseAgent via Windmill to confirm the token refreshes correctly. Module A depends on this for every test.
+
+4. **Refresh Gmail tokens:** Get fresh access tokens for both leads@ and teamgotcher@ accounts. Tokens expire every hour — refresh again if the session runs long.
+
+---
+
+## Cleanup Helpers (Between Test Re-Runs)
+
+If a test fails and needs to be re-run, clean up stale state first:
+
+```sql
+-- Clear staged leads for the test email
+DELETE FROM staged_leads WHERE lower(email) = 'jacob@resourcerealtygroupmi.com' AND NOT processed;
+
+-- Clear batch timer for the test email
+DELETE FROM processed_notifications WHERE key LIKE 'timer:%jacob@resourcerealtygroupmi.com%';
+```
+
+Also delete any orphaned drafts in teamgotcher@ and pending signals in jake_signals for the test contact.
 
 ---
 
@@ -67,6 +97,19 @@ git add windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_s
         windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
 git commit -m "feat: BCC leads@ on all outbound lead emails"
 ```
+
+---
+
+## Task 0A: Fix UpNest lead_type and city Fields Lost at Module C
+
+**Why:** Module C (dedup_and_group) builds a group dict per email but doesn't copy `lead_type` or `city` from the raw lead. This means ALL UpNest leads hit the `residential_seller` template regardless of buyer/seller type, and city extraction fails. This is a production bug.
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/dedup_and_group.inline_script.py` line 27
+
+**Fix:** Add `"lead_type": lead.get("lead_type", ""), "city": lead.get("city", ""),` to the group dict on line 27.
+
+**Already done in this worktree.** Commit with the BCC change.
 
 ---
 
@@ -195,6 +238,8 @@ After Jake sends a draft:
   A LoopNet user has favorited your listing.
 
   Contact Name: TEST Mark Thompson
+  Email: jacob@resourcerealtygroupmi.com
+  Phone: (734) 896-0518
   ```
 
 **Verify draft:**
@@ -203,7 +248,7 @@ After Jake sends a draft:
 - Signer: Larry
 - To: jacob@resourcerealtygroupmi.com
 
-**Note:** LoopNet leads often have name only (no email/phone). The parser extracts name from subject. Email falls back to generic parser — this test uses Contact Name label in body. If no email is parsed, the draft can't be created (no recipient). Verify parser behavior.
+**Note:** Real LoopNet leads often have name only (no email/phone). This test includes email/phone to verify the full template path. A no-email LoopNet lead would be silently dropped at Module C dedup — same behavior as Task 14.
 
 ---
 
@@ -377,6 +422,33 @@ After Jake sends a draft:
 
 ---
 
+### Task 9B: Crexi Info Request (Separated Path)
+
+**Why:** `crexi_info_request` leads are separated from standard leads at Module C — they go into a separate `info_requests` list. No draft is created, but they're logged in the signal payload. This tests that the separation works and doesn't break the flow.
+
+**Seed email:**
+- From: `notifications@notifications.crexi.com`
+- Subject: `TEST Alex Rivera is requesting information for 1480 Parkwood Ave - Ypsilanti`
+- Body:
+  ```
+  TEST Alex Rivera is requesting information about 1480 Parkwood Ave - Ypsilanti.
+  jacob@resourcerealtygroupmi.com
+  (734) 896-0518
+
+  Click below to access contact information for this buyer.
+  ```
+
+**Verify:**
+- `determine_crexi_source_type()` returns `crexi_info_request` (contains "requesting information")
+- Module C separates this into `info_requests` list (not `standard_leads`)
+- Module D: `info_request_count: 1` in summary, no draft created for this lead
+- If this is the ONLY lead in the batch: Module E should get `skipped: true` (no drafts to approve) and flow completes without suspension
+- If combined with another lead: info_request appears in signal detail but doesn't generate its own draft
+
+**Note:** Seed this alone (not combined with another lead) to test the clean "no-draft" completion path.
+
+---
+
 ## Group 2: Commercial Branching
 
 ### Task 10: Commercial Single Property — Followup
@@ -442,8 +514,15 @@ After Jake sends a draft:
 
 **Seed email:** Crexi notification with a company name instead of a person name.
 - From: `notifications@notifications.crexi.com`
-- Subject: `Bridgerow Blinds has opened your OM for 1480 Parkwood Ave - Ypsilanti`
-- Body: standard Crexi format with `jacob@resourcerealtygroupmi.com` and `(734) 896-0518`
+- Subject: `TEST Bridgerow Blinds has opened your OM for 1480 Parkwood Ave - Ypsilanti`
+- Body:
+  ```
+  TEST Bridgerow Blinds has opened the Offering Memorandum for 1480 Parkwood Ave - Ypsilanti in Ypsilanti.
+  jacob@resourcerealtygroupmi.com
+  (734) 896-0518
+
+  Click below to access contact information for this buyer.
+  ```
 
 **Verify draft:**
 - Greeting: "Hey there," (NOT "Hey Bridgerow,")
@@ -518,12 +597,13 @@ This is the same mechanism as Task 11 (multi-property). Verify the staging + 30s
 
 ### Task 18: Delete Draft — Rejection
 
-**Use:** One of the remaining unsent drafts from Group 1.
+**Use:** One of the remaining unsent drafts from Group 1 (e.g., Task 6 / Jennifer Brown / Social Connect).
 
 **Jake action:** Delete the draft in Gmail.
 
+**Manual resume:** The Apps Script daily poll normally detects deleted drafts. For testing, use the "How to Look Up resume_url for Manual Resume" helper above to find the pending signal's resume_url, then POST to it with `{ "action": "draft_deleted" }`.
+
 **Verify:**
-- Apps Script daily poll would normally detect this. For testing, manually trigger the Apps Script (`?action=run`) or POST to resume_url with `{ "action": "draft_deleted" }`.
 - Module F runs the rejection path
 - CRM note: "Lead rejected — draft deleted"
 - No SMS sent
@@ -542,13 +622,81 @@ This is the same mechanism as Task 11 (multi-property). Verify the staging + 30s
 
 ---
 
+## Helper: How to Seed a Conversation Reply
+
+Group 5-7 tests require seeding a "reply" into teamgotcher@ that looks like a prospect responding to our outreach. The webhook's reply detection works by checking unlabeled inbox messages on teamgotcher@ against ACTED signals' thread_ids.
+
+**Requirements for reply detection to work:**
+1. The original outreach draft must have been **sent** (creating an ACTED signal with the thread_id)
+2. The seeded reply must land in **teamgotcher@** inbox (not leads@)
+3. The reply must be on the **same Gmail thread** (use the same `threadId`)
+4. The reply must have proper threading headers (`In-Reply-To` and `References` matching the sent message's `Message-ID`)
+
+**Steps:**
+
+```bash
+# 1. Find the thread_id from the ACTED signal for the test you want to reply to
+#    Query jake_signals for the test contact's signal:
+curl -s "http://100.97.86.99:8000/api/w/rrg/scripts/run_sync/f/switchboard/pg_query" \
+  -H "Authorization: Bearer {windmill_token}" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SELECT id, detail->>'thread_id' as thread_id, detail->>'message_id' as message_id FROM jake_signals WHERE status='acted' AND summary LIKE '%TEST David%' ORDER BY created_at DESC LIMIT 1"}'
+
+# 2. Get a fresh access token for teamgotcher@
+curl -s -X POST https://oauth2.googleapis.com/token \
+  -d "client_id={rrg_gmail_automation.client_id}" \
+  -d "client_secret={rrg_gmail_automation.client_secret}" \
+  -d "refresh_token={teamgotcher.refresh_token}" \
+  -d "grant_type=refresh_token"
+
+# 3. Seed the reply into teamgotcher@ inbox with correct threading
+curl -X POST "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?internalDateSource=receivedTime" \
+  -H "Authorization: Bearer {teamgotcher_access_token}" \
+  -H "Content-Type: message/rfc822" \
+  --data-binary @- <<'MIME'
+From: jacob@resourcerealtygroupmi.com
+To: teamgotcher@gmail.com
+Subject: RE: Your Interest in 1480 Parkwood Ave - Ypsilanti
+In-Reply-To: <{message_id_from_step_1}>
+References: <{message_id_from_step_1}>
+Content-Type: text/plain; charset=utf-8
+
+{reply_text}
+MIME
+```
+
+**Important:** The `threadId` returned by Gmail is NOT set via MIME headers — Gmail auto-threads based on `In-Reply-To`/`References` + subject. If Gmail doesn't auto-thread, you may need to use the `messages.insert` endpoint with an explicit `threadId` parameter in the JSON metadata.
+
+---
+
+## Helper: How to Look Up resume_url for Manual Resume
+
+For Task 18 (draft deletion/rejection), the Apps Script daily poll normally detects deleted drafts. For testing, manually resume the suspended flow:
+
+```bash
+# 1. Find the pending signal for the test contact
+curl -s "http://100.97.86.99:8000/api/w/rrg/scripts/run_sync/f/switchboard/pg_query" \
+  -H "Authorization: Bearer {windmill_token}" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SELECT id, resume_url FROM jake_signals WHERE status='pending' AND summary LIKE '%TEST%' ORDER BY created_at DESC LIMIT 5"}'
+
+# 2. POST to the resume_url with draft_deleted action
+curl -X POST "{resume_url}" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "draft_deleted"}'
+```
+
+---
+
 ## Group 5: Lead Conversation — Classifications
 
-**Prerequisites:** Tests from Group 4 must be completed (need ACTED signals with matching thread_ids).
+**Prerequisites:** Tests from Group 4 must be completed (need ACTED signals with matching thread_ids). Use the "How to Seed a Conversation Reply" helper above.
 
-For each test, seed a reply into teamgotcher@ inbox using `messages.import` with the correct `threadId` and `In-Reply-To` headers so the webhook's reply detection matches it.
+For each test below, seed a reply into teamgotcher@ inbox using the helper. The reply MUST be threaded to a specific completed outreach thread — see the "Thread source" note on each task.
 
 ### Task 20: INTERESTED / WANT_SOMETHING
+
+**Thread source:** Reply to Task 1 (Crexi / David Johnson / commercial) thread.
 
 **Reply text:** "Can you send me the rent roll and financials?"
 
@@ -562,16 +710,20 @@ For each test, seed a reply into teamgotcher@ inbox using `messages.import` with
 
 ### Task 21: INTERESTED / GENERAL_INTEREST
 
+**Thread source:** Reply to Task 2 (LoopNet / Mark Thompson / commercial) thread.
+
 **Reply text:** "Thanks for reaching out! Tell me more about this property."
 
 **Verify:**
 - Claude classifies as INTERESTED / GENERAL_INTEREST
 - Response draft is a general follow-up
-- Signer matches original outreach
+- Signer: Larry (continues from original commercial outreach)
 
 ---
 
 ### Task 22: INTERESTED / OFFER (Terminal)
+
+**Thread source:** Reply to Task 3 (BizBuySell / Sarah Williams / commercial) thread.
 
 **Reply text:** "I'd like to make an offer. Would you accept $400,000?"
 
@@ -586,17 +738,21 @@ For each test, seed a reply into teamgotcher@ inbox using `messages.import` with
 
 ### Task 23: NOT_INTERESTED
 
+**Thread source:** Reply to Task 10 (Crexi followup / David Johnson / commercial) thread. This tests conversation on a followup-originated thread.
+
 **Reply text:** "Thanks but I'm not interested. Already found something."
 
 **Verify:**
 - Claude classifies as NOT_INTERESTED
 - Gracious apology draft created
 - Short, not pushy, leaves door open
-- Signer matches original outreach
+- Signer: Larry (continues from original commercial outreach)
 
 ---
 
 ### Task 24: IGNORE (Auto-Reply)
+
+**Thread source:** Reply to Task 11 (Crexi multi-property / Amanda Garcia / commercial) thread. Tests conversation on a multi-property-originated thread.
 
 **Reply text:**
 ```
@@ -617,9 +773,9 @@ This is an automated reply.
 
 ### Task 25: Residential Buyer Reply (Realtor.com Thread)
 
-**Prerequisite:** Task 4 (Realtor.com) must be sent and completed.
+**Thread source:** Reply to Task 4 (Realtor.com / Emily Carter / residential buyer) thread.
 
-**Seed reply in teamgotcher@** to the Realtor.com thread.
+**Seed reply in teamgotcher@** using the conversation reply helper. Thread to Emily Carter's Realtor.com outreach.
 
 **Reply text:** "Yes! I'd love to schedule a tour. What times are available this weekend?"
 
@@ -633,9 +789,9 @@ This is an automated reply.
 
 ### Task 26: Residential Seller Reply (Seller Hub Thread)
 
-**Prerequisite:** Task 5 (Seller Hub) must be sent and completed.
+**Thread source:** Reply to Task 5 (Seller Hub / Robert Davis / residential seller) thread.
 
-**Seed reply in teamgotcher@** to the Seller Hub thread.
+**Seed reply in teamgotcher@** using the conversation reply helper. Thread to Robert Davis's Seller Hub outreach.
 
 **Reply text:** "I'm thinking about selling but I'm not sure what my home is worth. Can you help?"
 
@@ -651,7 +807,7 @@ This is an automated reply.
 
 ### Task 27: Send Conversation Reply Draft
 
-**Use:** One of the reply drafts from Group 5/6.
+**Use:** The reply draft from Task 20 (WANT_SOMETHING / David Johnson commercial thread).
 
 **Jake action:** Send the draft in Gmail.
 
@@ -664,7 +820,7 @@ This is an automated reply.
 
 ### Task 28: Delete Conversation Reply Draft
 
-**Use:** One of the remaining reply drafts.
+**Use:** The reply draft from Task 21 (GENERAL_INTEREST / Mark Thompson commercial thread).
 
 **Jake action:** Delete the draft.
 
