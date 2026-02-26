@@ -422,7 +422,7 @@ SYSTEM_DOMAINS = {
     'crexi.com', 'loopnet.com', 'realtor.com', 'resourcerealty.com',
     'resourcerealtygroupmi.com', 'google.com', 'bizbuysell.com',
     'notifications.crexi.com', 'email.realtor.com',
-    'sellerappointmenthub.com', 'costar.com', 'topproducer.com',
+    'sellerappointmenthub.com', 'costar.com', 'topproducer.com', 'upnest.com',
 }
 
 
@@ -711,6 +711,12 @@ def parse_upnest_lead(service, msg_id, sender, subject):
         lead_type = m.group(1).lower()
         name = m.group(2).strip()
         city = m.group(3).strip()
+    else:
+        # Fallback: subject without city (e.g. "Lead claimed: Buyer John Doe")
+        m2 = re.match(r'Lead claimed:\s*(Buyer|Seller)\s+(.+)', subject, re.IGNORECASE)
+        if m2:
+            lead_type = m2.group(1).lower()
+            name = m2.group(2).strip()
 
     # Parse email and phone from body
     msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
@@ -729,16 +735,11 @@ def parse_upnest_lead(service, msg_id, sender, subject):
                 if candidate.lower() not in EXCLUDED_EMAIL_ADDRESSES:
                     email = candidate
         elif lower.startswith('phone') and i + 1 < len(lines):
-            phone = lines[i + 1]
+            candidate = lines[i + 1]
+            if re.search(r'\d', candidate):
+                phone = candidate
         elif lower.startswith('city') and i + 1 < len(lines) and not city:
             city = lines[i + 1]
-
-    # Fallback: try name from body if subject parsing failed
-    if not name:
-        for i, line in enumerate(lines):
-            if line == name or (i > 0 and "contact info" in lines[i - 1].lower()):
-                # Name is typically the first bold/standalone name after "contact info"
-                break
 
     if not email and not name:
         return None

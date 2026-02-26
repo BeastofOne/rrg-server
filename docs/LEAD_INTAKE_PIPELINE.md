@@ -3,7 +3,7 @@
 > **Flow path:** `f/switchboard/lead_intake`
 > **Last verified:** February 19, 2026
 
-The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, and Social Connect. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
+The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, Social Connect, and UpNest. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
 ---
 
@@ -33,7 +33,7 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBu
 The pipeline is triggered automatically by `f/switchboard/gmail_pubsub_webhook`. This webhook handles Gmail Pub/Sub push notifications from **two accounts** — each with its own OAuth resource and history cursor.
 
 **Split inbox architecture:**
-- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect)
+- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect/UpNest)
 - **teamgotcher@gmail.com** — sends drafts, receives replies to outreach
 
 Pub/Sub push notifications arrive within ~2-5 seconds via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`).
@@ -106,13 +106,15 @@ Gmail Pub/Sub notification → Windmill webhook
 | LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes — generic parser (name from subject only, rarely has email/phone) |
 | BizBuySell | `bizbuysell.com` | — | "BizBuySell" | Yes — generic parser (labeled: `Contact Name:`, `Contact Email:`, `Contact Phone:`) |
 | Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes — generic parser (labeled: `First Name:`, `Email Address:`, `Phone Number:`) |
-| Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes — generic parser (labeled: `Seller Name:`, `Email:`, `Phone Number:`) |
+| Seller Hub | `sellerappointmenthub.com` | Contains "New Verified Seller Lead" | "Seller Hub" | Yes — generic parser (labeled: `Seller Name:`, `Email:`, `Phone Number:`) |
 | Social Connect | — | Contains "Social Connect" | "Social Connect" | Yes — dedicated parser (label/value pairs on alternating lines: `Name\n[value]\nEmail\n[value]`) |
+| UpNest (claimed) | `upnest.com` | Contains "Lead claimed" | "UpNest" | Yes — dedicated parser (name/type/city from subject, email/phone from body labels) |
+| UpNest (info) | `upnest.com` | Other UpNest emails | "UpNest" | No — label only (no contact info in non-claimed emails) |
 | Reply to outreach | — | — (thread_id matches acted signal) | "Lead Reply" | No (triggers `lead_conversation`) |
 | Everything else | — | — | "Unlabeled" | No |
 
 **Parser architecture:**
-- **Dedicated parsers** (`parse_crexi_lead`, `parse_social_connect_lead`): Handle non-standard formats that don't use label prefixes
+- **Dedicated parsers** (`parse_crexi_lead`, `parse_social_connect_lead`, `parse_upnest_lead`): Handle non-standard formats that don't use label prefixes
 - **Generic parser** (`parse_lead_from_notification` → `parse_email_field`/`parse_name_field`/`parse_phone_field`): Handles labeled formats (`Key: Value`) with subject-line name fallback and bare-line phone fallback
 - **Email exclusion**: Filters out system/notification sender domains (crexi.com, loopnet.com, etc.) and specific addresses (support@crexi.com, teamgotcher@gmail.com). gmail.com is NOT excluded — most Crexi leads use personal Gmail
 - **Crexi source types**: `crexi_om`, `crexi_ca`, `crexi_info_request`, `crexi_brochure`, `crexi_floorplan`, `crexi_flyer`
@@ -265,16 +267,17 @@ The largest module. Selects an email template for each lead based on source type
 
 | Priority | Source | Condition | Template | Signed By |
 |----------|--------|-----------|----------|-----------|
-| 1 | Realtor.com | `source.lower() == "realtor.com"` | Residential buyer inquiry | Andrea |
-| 2 | Seller Hub, Social Connect | `is_residential_seller` | Residential seller outreach | Andrea |
-| 3 | Any | All properties are lead magnets | Lead magnet response | Larry |
-| 4 | Crexi / LoopNet / BizBuySell | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
-| 5 | Crexi / LoopNet / BizBuySell | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
-| 6 | Crexi / LoopNet / BizBuySell | Single property, followup | `commercial_followup_template` | Larry |
-| 7 | Crexi / LoopNet / BizBuySell | Single property, first contact | `commercial_first_outreach_template` | Larry |
-| 8 | Unknown | — | Skip (no draft created) | — |
+| 1 | Realtor.com | `source.lower() == "realtor.com"` | Residential buyer inquiry (`realtor_com`) | Andrea |
+| 2 | UpNest | `source == "upnest"` and `lead_type == "buyer"` | Residential buyer — "Buying a home?" (`residential_buyer`) | Andrea |
+| 3 | Seller Hub, Social Connect, UpNest | `is_residential_seller` catch-all | Residential seller — "Selling your home?" (`residential_seller`) | Andrea |
+| 4 | Any | All properties are lead magnets | Lead magnet response (`lead_magnet`) | Larry |
+| 5 | Crexi / LoopNet / BizBuySell | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
+| 6 | Crexi / LoopNet / BizBuySell | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
+| 7 | Crexi / LoopNet / BizBuySell | Single property, followup | `commercial_followup_template` | Larry |
+| 8 | Crexi / LoopNet / BizBuySell | Single property, first contact | `commercial_first_outreach_template` | Larry |
+| 9 | Unknown | — | Skip (no draft created) | — |
 
-**Residential templates (Realtor.com, Seller Hub, Social Connect):** All residential templates are signed by Andrea with phone (734) 223-1015. HTML signatures are appended automatically from the `f/switchboard/email_signatures` Windmill variable. Each template has a matching SMS version.
+**Residential templates (Realtor.com, Seller Hub, Social Connect, UpNest):** All residential templates are signed by Andrea with phone (734) 223-1015. HTML signatures are appended automatically from the `f/switchboard/email_signatures` Windmill variable. Each template has a matching SMS version. Residential seller/buyer templates use `{city}` extracted via `get_city()` (UpNest: from subject parsing; Seller Hub/Social Connect: from property_address).
 
 **Commercial templates (Crexi/LoopNet/BizBuySell):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
 

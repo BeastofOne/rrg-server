@@ -174,16 +174,31 @@ def determine_signer(source, template_used, sig_config=None):
 
 
 def generate_response_with_claude(classify_result, response_type, sender_name, phone):
-    """Use Claude to generate a contextual email response."""
+    """Use Claude to generate a contextual email response.
+
+    Selects prompt framework based on lead type:
+    - Commercial (Crexi, LoopNet, BizBuySell): CRE-specific language (OM, NDA, financials)
+    - Residential buyer (Realtor.com, UpNest buyer): home-buying language
+    - Residential seller (Seller Hub, Social Connect, UpNest seller): home-selling language
+    """
     lead_name = classify_result.get("lead_name", "")
     first_name = lead_name.split()[0] if lead_name else "there"
     properties = classify_result.get("properties", [])
     source = classify_result.get("source", "")
-    source_type = classify_result.get("source_type", "")
     has_nda = classify_result.get("has_nda", False)
     classification = classify_result.get("classification", {})
     wants = classification.get("wants", []) or []
     reply_body = classify_result.get("reply_body", "")
+
+    # Determine lead type for prompt selection
+    src = source.lower()
+    is_residential_seller = src in ("seller hub", "social connect", "upnest")
+    is_residential_buyer = src in ("realtor.com",)
+    # UpNest buyers also match is_residential_seller by source — check template_used
+    template_used = classify_result.get("template_used", "")
+    if template_used == "residential_buyer":
+        is_residential_seller = False
+        is_residential_buyer = True
 
     # Build property context
     prop_details = []
@@ -198,7 +213,7 @@ def generate_response_with_claude(classify_result, response_type, sender_name, p
         prop_details.append(detail)
     prop_text = "\n".join(f"  - {d}" for d in prop_details) if prop_details else "  (property details not available)"
 
-    # Build available docs context
+    # Build available docs context (commercial only)
     docs_available = []
     for p in properties:
         docs = p.get("documents", {})
@@ -208,6 +223,7 @@ def generate_response_with_claude(classify_result, response_type, sender_name, p
                     docs_available.append(f"{doc_type} for {p.get('canonical_name', 'property')}")
     docs_text = "\n".join(f"  - {d}" for d in docs_available) if docs_available else "  (no documents pre-loaded for this property)"
 
+    # ===== NOT INTERESTED (shared across all lead types) =====
     if response_type == "not_interested":
         prompt = f"""Write a brief email reply to a lead who is not interested.
 
@@ -229,6 +245,110 @@ RULES:
 - Do NOT include a closing, signoff, or signature — the signature is added automatically
 - Write ONLY the email body text"""
 
+    # ===== RESIDENTIAL SELLER prompts =====
+    elif is_residential_seller:
+        if response_type == "general_interest":
+            prompt = f"""Write a brief email reply to a homeowner who has shown general interest in selling their home.
+
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- Their reply: {reply_body[:500]}
+
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-4 sentences. Acknowledge their interest warmly. Offer to sit down and discuss their goals for selling. Mention your direct line.
+
+RULES:
+- Do NOT include a subject line
+- Do NOT invent details about their home or its value
+- Stay on topic — respond to what they said
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
+- Write ONLY the email body text"""
+        else:
+            # want_something for residential seller
+            wants_text = ", ".join(wants) if wants else "unspecified information"
+            prompt = f"""Write a brief email reply to a homeowner who is interested in selling and has asked for specific information.
+
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- What they asked for: {wants_text}
+- Their reply: {reply_body[:500]}
+
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-5 sentences. Address what they asked for. If they asked about home value or a CMA, offer to put one together. If they asked about commission or process, offer to sit down and walk them through it.
+
+RULES:
+- Do NOT include a subject line
+- Do NOT invent details about their home value or market conditions
+- If they ask about something you don't have data for, say "I'd love to sit down and go over that with you"
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
+- Write ONLY the email body text"""
+
+    # ===== RESIDENTIAL BUYER prompts =====
+    elif is_residential_buyer:
+        if response_type == "general_interest":
+            prompt = f"""Write a brief email reply to a home buyer who has shown general interest.
+
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- Their reply: {reply_body[:500]}
+
+PROPERTY DATA (use ONLY this data, do NOT invent any facts):
+{prop_text}
+
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-4 sentences. Acknowledge their interest warmly. Offer to provide more details or schedule a showing. Mention your direct line.
+
+RULES:
+- Do NOT include a subject line
+- Do NOT invent property details not listed above
+- Stay on topic — respond to what they said
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
+- Write ONLY the email body text"""
+        else:
+            # want_something for residential buyer
+            wants_text = ", ".join(wants) if wants else "unspecified information"
+            prompt = f"""Write a brief email reply to a home buyer who has asked for specific information about a property.
+
+SENDER IDENTITY:
+- You are {sender_name} from Resource Realty Group
+- Your direct line: {phone}
+
+LEAD CONTEXT:
+- Lead's first name: {first_name}
+- What they asked for: {wants_text}
+- Their reply: {reply_body[:500]}
+
+PROPERTY DATA (use ONLY this data, do NOT invent any facts):
+{prop_text}
+
+STRUCTURE (follow exactly):
+1. Greeting: "Hey {first_name},"
+2. Body: 3-5 sentences. Address ONLY what they asked for. If the data is above, include it. If not, say "Let me check on that and get back to you."
+
+RULES:
+- Do NOT include a subject line
+- Do NOT invent numbers, prices, or facts not listed in PROPERTY DATA
+- If they want a tour/showing, offer to schedule and ask for preferred date/time
+- If they ask about similar homes, offer to send some options
+- Do NOT include a closing, signoff, or signature — the signature is added automatically
+- Write ONLY the email body text"""
+
+    # ===== COMMERCIAL prompts (existing) =====
     elif response_type == "general_interest":
         prompt = f"""Write a brief email reply to a lead who has shown general interest but hasn't asked for anything specific.
 
@@ -344,7 +464,7 @@ RULES:
 - Write ONLY the email body text"""
 
     else:
-        return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions about the property, don't hesitate to reach out. My direct line is {phone}."
+        return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions, don't hesitate to reach out. My direct line is {phone}."
 
     try:
         result = subprocess.run(

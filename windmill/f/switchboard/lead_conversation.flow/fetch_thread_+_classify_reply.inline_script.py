@@ -91,7 +91,7 @@ def fetch_thread_context(service, thread_id):
     return formatted
 
 
-def classify_with_claude(thread_messages, reply_body, lead_name, properties, has_nda):
+def classify_with_claude(thread_messages, reply_body, lead_name, properties, has_nda, source="", template_used=""):
     """Use Claude to classify the lead's reply intent."""
 
     property_info = []
@@ -111,7 +111,26 @@ def classify_with_claude(thread_messages, reply_body, lead_name, properties, has
         thread_text += f"Date: {msg['date']}\n"
         thread_text += f"Body:\n{msg['body']}\n"
 
-    prompt = f"""You are classifying a reply in a commercial real estate email thread.
+    # Select context/wants based on lead type
+    src = source.lower()
+    is_residential_seller = src in ("seller hub", "social connect", "upnest")
+    is_residential_buyer = src in ("realtor.com",)
+    # UpNest buyers also match is_residential_seller by source — check template_used
+    if template_used == "residential_buyer":
+        is_residential_seller = False
+        is_residential_buyer = True
+
+    if is_residential_seller:
+        context_line = "You are classifying a reply in a residential real estate email thread. The lead was contacted about selling their home."
+        wants_line = "tour, cma, home_value, commission, timeline, staging, repairs, listing_agreement, market_conditions, still_interested, other"
+    elif is_residential_buyer:
+        context_line = "You are classifying a reply in a residential real estate email thread. The lead inquired about buying a home."
+        wants_line = "tour, more_info, price, availability, similar_homes, neighborhood, schools, mortgage, still_available, other"
+    else:
+        context_line = "You are classifying a reply in a commercial real estate email thread."
+        wants_line = "tour, brochure, om, financials, rent_roll, t12, proforma, price, zoning, size, units, hoa, broker_coop, still_available, why_selling, seller_terms, nda, other"
+
+    prompt = f"""{context_line}
 
 Context:
 - Properties involved:
@@ -134,14 +153,14 @@ Classify this reply into exactly ONE category:
 
 If INTERESTED, also determine the sub-category:
 - OFFER — They're making or discussing a purchase offer, price negotiation, specific deal terms, LOI, or closing conditions
-- WANT_SOMETHING — They're asking for specific information, documents, or services (tour, OM, financials, etc.)
+- WANT_SOMETHING — They're asking for specific information, documents, or services
 - GENERAL_INTEREST — They're interested but haven't asked for anything specific yet (e.g., "sounds great", "tell me more", "I'm interested")
 
 If WANT_SOMETHING, list what they want. Pick ALL that apply from:
-tour, brochure, om, financials, rent_roll, t12, proforma, price, zoning, size, units, hoa, broker_coop, still_available, why_selling, seller_terms, nda, other
+{wants_line}
 
 Respond with ONLY valid JSON (no markdown fences, no explanation outside the JSON):
-{{"classification": "INTERESTED", "sub_classification": "OFFER" or "WANT_SOMETHING" or "GENERAL_INTEREST", "wants": ["tour", "om"] or null, "confidence": 0.85, "reasoning": "brief 1-sentence explanation"}}"""
+{{"classification": "INTERESTED", "sub_classification": "OFFER" or "WANT_SOMETHING" or "GENERAL_INTEREST", "wants": ["tour", "more_info"] or null, "confidence": 0.85, "reasoning": "brief 1-sentence explanation"}}"""
 
     try:
         result = subprocess.run(
@@ -204,7 +223,7 @@ def main(reply_data: dict):
 
     # 2. Classify with Claude
     classification = classify_with_claude(
-        thread_messages, reply_body, lead_name, properties, has_nda
+        thread_messages, reply_body, lead_name, properties, has_nda, source, template_used
     )
 
     return {
