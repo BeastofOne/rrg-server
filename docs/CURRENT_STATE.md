@@ -1,6 +1,6 @@
 # RRG-Server — Current State
 
-## Verified February 14, 2026
+## Verified February 26, 2026
 
 This document reflects the **actual current state** of RRG-Server, verified by SSH inspection:
 - `docker ps` for all running containers
@@ -437,8 +437,9 @@ Docker volumes (some may be orphaned):
 4. ~~**rrg-brochure is 4.91GB**~~ — Accepted; Chromium + claude-code are required, works as-is
 5. ~~**docuseal-source/ is empty**~~ — Deleted (was empty leftover)
 6. **No monitoring** — No health checks or alerts if services go down
+7. **Windmill resources not covered by sync** — `wmill sync push/pull` only handles flows/scripts. Resources, variables, schedules, and webhooks must be recreated manually. See "Windmill Resources (Recovery Reference)" section above.
 
 ---
 
-*Last verified: February 23, 2026*
+*Last verified: February 26, 2026*
 *Source: Direct SSH inspection + dataflow analysis*
