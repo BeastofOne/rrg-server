@@ -1,7 +1,7 @@
 # Lead Conversation Engine
 
 > **Flow path:** `f/switchboard/lead_conversation`
-> **Last verified:** February 20, 2026
+> **Last verified:** February 26, 2026
 
 The lead conversation engine processes replies to outreach emails from commercial (Crexi, LoopNet, BizBuySell) and residential (Realtor.com, Seller Hub, Social Connect, UpNest) leads. It classifies the lead's intent using source-appropriate prompts, generates a response draft, and follows the same approval pattern as the lead intake pipeline.
 
@@ -152,6 +152,7 @@ Routes by classification:
 | INTERESTED | WANT_SOMETHING | Look up property docs, generate response via Claude, create draft | No |
 | INTERESTED | GENERAL_INTEREST | Generate follow-up via Claude, create draft | No |
 | NOT_INTERESTED | — | Generate apology via Claude, create draft | No |
+| *Lead magnet* | *any* | *Redirect toward active listings (override)* | No |
 
 **Draft creation:** Creates Gmail reply drafts in the same thread:
 ```python
@@ -276,6 +277,7 @@ Uses the same resources as lead intake:
 - `f/switchboard/property_mapping` — Property metadata + document paths
 - `f/switchboard/sms_gateway_url` — SMS gateway endpoint
 - `f/switchboard/router_token` — Windmill API token for triggering flows
+- `f/switchboard/email_signatures` — JSON config: signer profiles (name, phone, HTML signature), template-prefix-to-signer mapping, source-to-signer mapping
 
 ---
 
@@ -288,4 +290,4 @@ From the original plan, these remain:
 
 ---
 
-*Last updated: February 25, 2026 — Migrated from deprecated HTTP claude_endpoint_url to subprocess Claude CLI in Windmill worker. E2E tested successfully.*
+*Last updated: February 26, 2026 — Rigid prompt frameworks, three-way source classification, residential buyer/seller prompts, lead magnet redirect, signer continuity via template_used + email_signatures variable. E2E verified for all sources.*

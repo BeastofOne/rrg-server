@@ -1,7 +1,7 @@
 # Lead Intake Pipeline
 
 > **Flow path:** `f/switchboard/lead_intake`
-> **Last verified:** February 19, 2026
+> **Last verified:** February 26, 2026
 
 The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, Social Connect, and UpNest. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
@@ -541,7 +541,7 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 | `f/switchboard/gmail_last_history_id` | Gmail History API cursor for teamgotcher@ |
 | `f/switchboard/gmail_leads_last_history_id` | Gmail History API cursor for leads@ |
 | `f/switchboard/router_token` | Auth token used by gmail_pubsub_webhook for resume URL POSTs |
-| `f/switchboard/claude_endpoint_url` | Claude API proxy URL on jake-macbook (`http://100.108.74.112:8787`) |
+| `f/switchboard/email_signatures` | JSON config: signer profiles (name, phone, HTML signature), template-prefix-to-signer mapping, source-to-signer mapping |
 
 **Windmill Scripts (all under `f/switchboard/`):**
 
@@ -613,4 +613,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 23, 2026 — Module C fuzzy property dedup, Module D canonical_name fallback for city-only addresses, webhook 30s batch window.*
+*Last updated: February 26, 2026 — Residential templates (Andrea signs all), UpNest parser + buyer/seller disambiguation, three-way source classification, lead magnet template (Larry signs), email_signatures variable for signer determination, stale claude_endpoint_url removed. E2E verified for all sources.*
