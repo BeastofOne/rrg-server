@@ -54,14 +54,6 @@ docker compose down && docker compose up -d
 - `bundix` generates wrong hashes for platform-specific gems (ffi, nokogiri, sqlite3) — fix with `nix-prefetch-url`
 - nokogiri needs `mini_portile2` added to gemset.nix (not in Gemfile.lock for platform-specific gems)
 
-## rrg-claude-endpoint (pm2 on jake-macbook)
-
-```bash
-pm2 start server.js --name claude-endpoint
-pm2 restart claude-endpoint
-pm2 logs claude-endpoint
-```
-
 ## Auto-Sync
 
 Both jake-macbook and rrg-server run `rrg-sync.sh` on 5-minute cron:
@@ -73,12 +65,21 @@ Windmill flows sync hourly via `windmill/sync-pull.sh` cron on rrg-server.
 
 ## Windmill Disaster Recovery
 
-Flows/scripts are version-controlled in `windmill/f/` (via `wmill sync pull`).
-To restore to a fresh Windmill instance:
+**Flows/scripts** are version-controlled in `windmill/f/` (via `wmill sync pull`).
+To restore flows/scripts to a fresh Windmill instance:
 ```bash
 cd ~/rrg-server/windmill
 wmill sync push --base-url http://localhost:8000 --workspace rrg --token <token>
 ```
+
+**WARNING:** `wmill sync push` restores flows and scripts ONLY. It does NOT restore:
+- Resources (OAuth credentials, Postgres connection, etc.)
+- Variables (property_mapping, history cursors, tokens, etc.)
+- Schedules, webhooks, or Gmail watches
+
+To restore these, see the "Windmill Resources" and "Windmill Variables" sections in `CURRENT_STATE.md` for schemas, credential sources, and re-auth procedures. All secret values live in `~/.secrets/jake-system.json` on jake-macbook.
+
+**CRITICAL:** The Windmill API uses **POST** (not PUT) for both `resources/create` and `resources/update` endpoints. PUT returns 405 silently.
 
 ## Docker Compose Files
 

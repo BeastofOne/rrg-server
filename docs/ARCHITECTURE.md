@@ -87,7 +87,6 @@ graph TB
 
     subgraph MAC["JAKE'S MAC (100.108.74.112)"]
         CLAUDE_CLI["<b>Claude Code</b><br/>Interactive terminal"]
-        CLAUDE_EP["<b>claude-endpoint</b><br/>:8787 (pm2)"]
         MCP_HS["HubSpot MCP"]
         MCP_WM["Windmill MCP"]
     end
