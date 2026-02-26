@@ -43,7 +43,7 @@ from google.oauth2.credentials import Credentials
 WM_API_BASE = os.environ.get('BASE_INTERNAL_URL', 'http://localhost:8000')
 
 # Categories that trigger lead parsing
-LEAD_CATEGORIES = {"crexi", "loopnet", "realtor_com", "seller_hub", "bizbuysell", "social_connect"}
+LEAD_CATEGORIES = {"crexi", "loopnet", "realtor_com", "seller_hub", "bizbuysell", "social_connect", "upnest"}
 
 # Account configuration: maps emailAddress to OAuth resource + history variable
 ACCOUNT_CONFIG = {
@@ -326,7 +326,7 @@ def categorize_email(sender, subject):
     if subject_lower.startswith("new realtor.com lead"):
         return ("realtor_com", "Realtor.com")
 
-    if "new verified seller lead" in subject_lower:
+    if "new verified seller lead" in subject_lower and "sellerappointmenthub.com" in sender_lower:
         return ("seller_hub", "Seller Hub")
 
     if "bizbuysell.com" in sender_lower:
@@ -335,6 +335,12 @@ def categorize_email(sender, subject):
     # Social Connect / Top Producer leads
     if "social connect" in subject_lower:
         return ("social_connect", "Social Connect")
+
+    # UpNest leads — "Lead claimed" emails have contact info, others don't
+    if "upnest.com" in sender_lower:
+        if "lead claimed" in subject_lower:
+            return ("upnest", "UpNest")
+        return ("upnest_info", "UpNest")
 
     return ("unlabeled", "Unlabeled")
 
@@ -416,7 +422,7 @@ SYSTEM_DOMAINS = {
     'crexi.com', 'loopnet.com', 'realtor.com', 'resourcerealty.com',
     'resourcerealtygroupmi.com', 'google.com', 'bizbuysell.com',
     'notifications.crexi.com', 'email.realtor.com',
-    'sellerappoinmenthub.com', 'costar.com', 'topproducer.com',
+    'sellerappointmenthub.com', 'costar.com', 'topproducer.com',
 }
 
 
@@ -683,6 +689,72 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
     }
 
 
+def parse_upnest_lead(service, msg_id, sender, subject):
+    """Parse lead data from an UpNest 'Lead claimed' email.
+
+    Subject format: 'Lead claimed: Buyer Melina Griswold in Pinckney'
+    Body has label-value pairs:
+      [Name]
+      City:
+      [City]
+      Phone:
+      [Phone]
+      Email:
+      [Email]
+    """
+    # Extract lead_type (Buyer/Seller), name, and city from subject
+    lead_type = ""
+    name = ""
+    city = ""
+    m = re.match(r'Lead claimed:\s*(Buyer|Seller)\s+(.+?)\s+in\s+(.+)', subject, re.IGNORECASE)
+    if m:
+        lead_type = m.group(1).lower()
+        name = m.group(2).strip()
+        city = m.group(3).strip()
+
+    # Parse email and phone from body
+    msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+    body = get_body_from_payload(msg.get('payload', {}))
+
+    lines = [l.strip() for l in body.split('\n') if l.strip()]
+
+    email = ""
+    phone = ""
+
+    for i, line in enumerate(lines):
+        lower = line.lower()
+        if lower.startswith('email') and i + 1 < len(lines):
+            candidate = lines[i + 1]
+            if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', candidate):
+                if candidate.lower() not in EXCLUDED_EMAIL_ADDRESSES:
+                    email = candidate
+        elif lower.startswith('phone') and i + 1 < len(lines):
+            phone = lines[i + 1]
+        elif lower.startswith('city') and i + 1 < len(lines) and not city:
+            city = lines[i + 1]
+
+    # Fallback: try name from body if subject parsing failed
+    if not name:
+        for i, line in enumerate(lines):
+            if line == name or (i > 0 and "contact info" in lines[i - 1].lower()):
+                # Name is typically the first bold/standalone name after "contact info"
+                break
+
+    if not email and not name:
+        return None
+
+    return {
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "source": "UpNest",
+        "source_type": "upnest",
+        "lead_type": lead_type,
+        "city": city,
+        "notification_message_id": msg_id
+    }
+
+
 def parse_lead_from_notification(service, msg_id, sender, subject, category):
     """Fetch full message body and parse lead data from a notification email.
 
@@ -696,6 +768,8 @@ def parse_lead_from_notification(service, msg_id, sender, subject, category):
         return parse_crexi_lead(service, msg_id, sender, subject)
     if category == "social_connect":
         return parse_social_connect_lead(service, msg_id, sender, subject)
+    if category == "upnest":
+        return parse_upnest_lead(service, msg_id, sender, subject)
 
     # Generic parsing for label-based formats (Realtor.com, Seller Hub, BizBuySell, LoopNet)
     msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()

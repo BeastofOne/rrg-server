@@ -2,7 +2,7 @@
 # Uses Gmail API directly via OAuth to create drafts in teamgotcher@gmail.com
 #
 # Commercial templates (Crexi/LoopNet) and Lead Magnet signed by Larry.
-# Residential templates (Realtor.com, Seller Hub, Social Connect) signed by Andrea.
+# Residential templates (Realtor.com, Seller Hub, Social Connect, UpNest) signed by Andrea.
 # Followup detection comes from Module A (WiseAgent notes), not Gmail sent folder.
 
 #extra_requirements:
@@ -108,6 +108,27 @@ def get_first_name(full_name):
     if first_word.lower() in COMMON_FIRST_NAMES:
         return first_word.capitalize()
     return "there"
+
+
+def get_city(lead, properties):
+    """Extract city from lead data.
+
+    UpNest leads have a top-level 'city' field from subject parsing.
+    Seller Hub / Social Connect leads derive city from property_address.
+    """
+    # Direct city field (UpNest)
+    city = lead.get("city", "")
+    if city:
+        return city
+
+    # Extract from property_address: '123 Main St, Adrian, MI 49221' → 'Adrian'
+    if properties:
+        addr = properties[0].get("property_address", "")
+        parts = [p.strip() for p in addr.split(",")] if addr else []
+        if len(parts) >= 2:
+            return parts[-2] if len(parts) >= 3 else parts[0]
+
+    return ""
 
 
 def format_property_list_inline(properties):
@@ -259,17 +280,25 @@ def main(grouped_data: dict):
             draft["sms_body"] = f"Hey {first_name}, this is Andrea. I received your Realtor.com inquiry about {addr}. If you'd like more information or to schedule a tour, just let me know the best day & time that works for you and I'll get that scheduled. Keep in mind the sooner, the better as properties sell quickly." if phone else None
             draft["template_used"] = "realtor_com"
 
-        # 2. Residential seller (Seller Hub, UpNest, Top Producer, Social Connect — signed Andrea)
+        # 2. UpNest buyer (residential buyer, signed Andrea)
+        elif source.lower() == "upnest" and lead.get("lead_type") == "buyer":
+            city = get_city(lead, properties)
+            city_text = f" in {city}" if city else ""
+            draft["email_subject"] = "Introductions, Buying a home?"
+            draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source}. They indicated you might be looking to purchase a home{city_text} soon. If you're open to it, I'd love to schedule a time to discuss further. My direct line is (734) 223-1015. Please do not hesitate to reach out with any questions or concerns."
+            draft["sms_body"] = f"Hey {first_name}, this is Andrea from Resource Realty Group. I got your info from {source}. Are you looking to purchase a home{city_text}? I'd love to sit down and discuss. My direct line is (734) 223-1015." if phone else None
+            draft["template_used"] = "residential_buyer"
+
+        # 3. Residential seller (Seller Hub, Social Connect, UpNest sellers — signed Andrea)
         elif is_residential_seller:
-            prop = properties[0] if properties else {}
-            addr = prop.get("property_address") or prop.get("canonical_name", "your property")
-            canonical = prop.get("canonical_name", addr)
-            draft["email_subject"] = f"RE: Your interest in {canonical}"
-            draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out my property, {addr}. If you'd like more information, just let me know and I'll be more than happy to answer any questions you may have. Should you want to view the property, just let me know the best day and time that works for you and I'll get that scheduled. Keep in mind the sooner the better as properties are selling quick.\n\nIf you'd rather talk over the phone, my direct line is (734) 223-1015. Please do not hesitate to reach out with any questions or concerns."
-            draft["sms_body"] = f"Hey {first_name}, this is Andrea from Resource Realty Group. I got your info when you checked out {addr}. If you'd like more information or to schedule a viewing, just let me know! My direct line is (734) 223-1015." if phone else None
+            city = get_city(lead, properties)
+            city_text = f" in {city}" if city else ""
+            draft["email_subject"] = "Introductions, Selling your home?"
+            draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source}. They indicated you might be interested in selling your home{city_text}. If you're open to it, I'd love to schedule a time to sit down and discuss more. My direct line is (734) 223-1015. Please do not hesitate to reach out with any questions or concerns."
+            draft["sms_body"] = f"Hey {first_name}, this is Andrea from Resource Realty Group. I got your info from {source}. Are you thinking about selling your home{city_text}? I'd love to sit down and discuss. My direct line is (734) 223-1015." if phone else None
             draft["template_used"] = "residential_seller"
 
-        # 3. Lead magnet — all properties are lead_magnet (signed Larry for commercial)
+        # 4. Lead magnet — all properties are lead_magnet (signed Larry for commercial)
         elif has_lead_magnet and not non_magnet_props:
             magnet = properties[0]
             canonical = magnet.get("canonical_name", "")
@@ -279,18 +308,18 @@ def main(grouped_data: dict):
             draft["sms_body"] = f"Hey {first_name}, this is Larry from Resource Realty Group. I saw you checked out {canonical}. That one's no longer available, but I have some similar properties. Let me know if you're interested! My direct line is (734) 732-3789." if phone else None
             draft["template_used"] = "lead_magnet"
 
-        # 4-7. Commercial (Crexi/LoopNet) — signed Larry
+        # 5-8. Commercial (Crexi/LoopNet) — signed Larry
         elif is_commercial:
             if len(properties) > 1:
                 # Multi-property
                 if is_followup:
-                    # 4. commercial_multi_property_followup
+                    # 5. commercial_multi_property_followup
                     draft["email_subject"] = "RE: Your Interest in Multiple Properties"
                     draft["email_body"] = f"Hey {first_name},\n\nI see you checked out a few more of my listings. If you'd like to check out more information on any of these, just let me know and I'll send over the OMs."
                     draft["sms_body"] = f"Hey {first_name}, I see you checked out a few more of my listings. Let me know if you'd like the OMs on any of them! - Larry" if phone else None
                     draft["template_used"] = "commercial_multi_property_followup"
                 else:
-                    # 5. commercial_multi_property_first_contact
+                    # 6. commercial_multi_property_first_contact
                     prop_text = format_property_list_inline(non_magnet_props or properties)
                     draft["email_subject"] = "RE: Your Interest in Multiple Properties"
                     draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out {prop_text}.\n\nIf you'd like to check out more information on any of these, just let me know and I'll send over the OMs.\n\nAlternatively, we also have some off-market properties that might be a good fit, depending on what you're looking for. They would require an NDA to be signed, so just let me know and I can send one over to you.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns."
@@ -302,19 +331,19 @@ def main(grouped_data: dict):
                 addr = prop.get("property_address") or prop.get("canonical_name", "the property")
                 canonical = prop.get("canonical_name", addr)
                 if is_followup:
-                    # 6. commercial_followup_template
+                    # 7. commercial_followup_template
                     draft["email_subject"] = f"RE: Your Interest in {canonical}"
                     draft["email_body"] = f"Hey {first_name},\n\nI see you checked out another property - {addr}.\n\nIf you'd like to check out more information on this one, just let me know and I'll send over the OM."
                     draft["sms_body"] = f"Hey {first_name}, I see you checked out another property - {addr}. Let me know if you'd like the OM on this one! - Larry" if phone else None
                     draft["template_used"] = "commercial_followup_template"
                 else:
-                    # 7. commercial_first_outreach_template
+                    # 8. commercial_first_outreach_template
                     draft["email_subject"] = f"RE: Your Interest in {canonical}"
                     draft["email_body"] = f"Hey {first_name},\n\nI got your information off of {source} when you checked out my property, {addr}.\n\nIf you'd like to check out more information, just let me know and I'll send over the OM so you can check it out.\n\nAlternatively, we also have some off-market properties that might be a good fit, depending on what you're looking for. They would require an NDA to be signed, so just let me know and I can send one over to you.\n\nIf you'd rather talk over the phone, my direct line is (734) 732-3789. Please do not hesitate to reach out with any questions or concerns."
                     draft["sms_body"] = f"Hey {first_name}, this is Larry from Resource Realty Group. I got your information off of {source} when you checked out my property, {addr}. If you'd like more info, just let me know and I'll send over the OM. My direct line is (734) 732-3789." if phone else None
                     draft["template_used"] = "commercial_first_outreach_template"
 
-        # 8. Unknown source type — skip (no draft)
+        # 9. Unknown source type — skip (no draft)
         else:
             continue
 
