@@ -246,12 +246,12 @@ Windmill variables:
 |----------|---------|--------|---------|
 | `f/switchboard/property_mapping` | JSON: property alias → canonical name mapping | No | `lead_intake/property_match` |
 | `f/switchboard/sms_gateway_url` | SMS gateway URL (Pixel 9a) | No | `lead_intake/post_approval`, `lead_conversation/post_approval`, `check_gmail_watch_health` |
-| `f/switchboard/gmail_last_history_id` | Gmail History API cursor for teamgotcher@ | No | `gmail_pubsub_webhook` (read/write) |
+| `f/switchboard/gmail_last_history_id` | Gmail History API cursor for teamgotcher@ | No | `gmail_pubsub_webhook` (read/write), `gmail_polling_trigger` (deprecated, read only) |
 | `f/switchboard/gmail_leads_last_history_id` | Gmail History API cursor for leads@ | No | `gmail_pubsub_webhook` (read/write) |
 | `f/switchboard/router_token` | Auth token for internal Windmill API job triggers | Yes | `gmail_pubsub_webhook`, `process_staged_leads`, `check_gmail_watch_health` |
 | `f/switchboard/email_signatures` | HTML email signatures (Larry + Andrea) | No | Not currently referenced by any script |
 
-**Note:** `f/switchboard/email_signatures` exists but is unused by scripts. It may be safe to delete, or it may be needed for future draft generation enhancements.
+**Note:** `f/switchboard/email_signatures` exists but is unused by scripts. Do NOT recreate during recovery unless future code is written to consume it.
 
 ### Windmill Resources (Recovery Reference)
 
@@ -318,7 +318,7 @@ Each resource below documents its schema (required keys), where credential value
 - **Schema:** `{ host, port, user, password, dbname, sslmode }`
 - **Credentials source:** `jake-system.json` → `windmill.postgres`
 - **Important:** `host` must be `db` (Docker internal hostname), NOT an external IP. Scripts run inside the Windmill worker container on the `windmill_default` Docker network.
-- **Used by:** `gmail_pubsub_webhook`, `write_signal`, `read_signals`, `act_signal`, `get_pending_draft_signals`, `process_staged_leads`, `lead_intake/approval_gate`, `lead_intake/post_approval`, `lead_conversation/approval_gate`, `lead_conversation/post_approval`, `lead_conversation/generate_response`
+- **Used by:** `gmail_pubsub_webhook`, `write_signal`, `read_signals`, `act_signal`, `get_pending_draft_signals`, `process_staged_leads`, `lead_intake/wiseagent_lookup`, `lead_intake/approval_gate`, `lead_intake/post_approval`, `lead_conversation/approval_gate`, `lead_conversation/post_approval`, `lead_conversation/generate_response`
 
 ---
 
