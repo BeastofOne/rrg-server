@@ -1,9 +1,9 @@
 # Lead Conversation Engine
 
 > **Flow path:** `f/switchboard/lead_conversation`
-> **Last verified:** February 20, 2026
+> **Last verified:** February 26, 2026
 
-The lead conversation engine processes replies to CRE outreach emails from Crexi and LoopNet leads. It classifies the lead's intent, generates an appropriate response draft, and follows the same approval pattern as the lead intake pipeline.
+The lead conversation engine processes replies to outreach emails from commercial (Crexi, LoopNet, BizBuySell) and residential (Realtor.com, Seller Hub, Social Connect, UpNest) leads. It classifies the lead's intent using source-appropriate prompts, generates a response draft, and follows the same approval pattern as the lead intake pipeline.
 
 ---
 
@@ -108,7 +108,12 @@ Fetches the full Gmail thread via `threads().get()`, formats messages chronologi
 
 **Claude CLI:** Uses `subprocess.run(["claude", "-p", ...])` calling the Claude CLI installed in the Windmill worker container (`/usr/local/bin/claude`, teamgotcher account). Env vars `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_MODEL` passed through via `WHITELIST_ENVS`.
 
-**Classification prompt asks Claude for JSON:**
+**Classification prompt branches by source type:**
+- **Commercial** (Crexi, LoopNet, BizBuySell): CRE-specific wants (tour, om, financials, rent_roll, nda, etc.)
+- **Residential buyer** (Realtor.com, UpNest buyer): Home-buying wants (tour, more_info, price, similar_homes, etc.)
+- **Residential seller** (Seller Hub, Social Connect, UpNest seller): Home-selling wants (cma, home_value, commission, timeline, etc.)
+
+**Classification output JSON:**
 ```json
 {
   "classification": "INTERESTED|IGNORE|NOT_INTERESTED|ERROR",
@@ -147,6 +152,7 @@ Routes by classification:
 | INTERESTED | WANT_SOMETHING | Look up property docs, generate response via Claude, create draft | No |
 | INTERESTED | GENERAL_INTEREST | Generate follow-up via Claude, create draft | No |
 | NOT_INTERESTED | — | Generate apology via Claude, create draft | No |
+| *Lead magnet* | *any* | *Redirect toward active listings (override)* | No |
 
 **Draft creation:** Creates Gmail reply drafts in the same thread:
 ```python
@@ -158,7 +164,12 @@ draft = service.users().drafts().create(
 
 Drafts include `In-Reply-To` and `References` headers pointing to the reply's `Message-ID` so they thread correctly.
 
-**Signing convention:** Commercial leads (Crexi/LoopNet) are signed by Larry with phone (734) 732-3789. Other sources signed by Jake.
+**Signing convention:** Determined by `determine_signer()` using the `f/switchboard/email_signatures` Windmill variable. Commercial leads (Crexi/LoopNet/BizBuySell) signed by Larry. Residential leads (Realtor.com, Seller Hub, Social Connect, UpNest) signed by Andrea. In-flight thread continuity preserved via `template_used` field.
+
+**Response prompt frameworks branch by lead type:**
+- **Commercial:** CRE-specific language (OM, NDA, brochure, financials, market status)
+- **Residential buyer:** Home-buying language (showings, similar homes, neighborhood info)
+- **Residential seller:** Home-selling language (CMA, commission, listing process, timeline)
 
 **Document lookup (WANT_SOMETHING):** Checks `f/switchboard/property_mapping` for the property's `documents` field. If the requested document is available (non-null file path), includes it in the response. Currently all document paths are null — to be populated per property.
 
@@ -266,6 +277,7 @@ Uses the same resources as lead intake:
 - `f/switchboard/property_mapping` — Property metadata + document paths
 - `f/switchboard/sms_gateway_url` — SMS gateway endpoint
 - `f/switchboard/router_token` — Windmill API token for triggering flows
+- `f/switchboard/email_signatures` — JSON config: signer profiles (name, phone, HTML signature), template-prefix-to-signer mapping, source-to-signer mapping
 
 ---
 
@@ -278,4 +290,4 @@ From the original plan, these remain:
 
 ---
 
-*Last updated: February 25, 2026 — Migrated from deprecated HTTP claude_endpoint_url to subprocess Claude CLI in Windmill worker. E2E tested successfully.*
+*Last updated: February 26, 2026 — Rigid prompt frameworks, three-way source classification, residential buyer/seller prompts, lead magnet redirect, signer continuity via template_used + email_signatures variable. E2E verified for all sources.*

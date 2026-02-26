@@ -36,8 +36,8 @@ rrg-server/
 **claude_llm.py:** Shared across all three services. LangChain `BaseChatModel` wrapping `claude -p` CLI. Model from env `CLAUDE_MODEL` (default: "haiku").
 
 **Windmill flows** (source in `windmill/f/switchboard/`):
-- `lead_intake` — 6-module pipeline: WiseAgent lookup → property match → dedup → drafts → approval gate → post-approval
-- `lead_conversation` — 4-module pipeline: classify reply → generate response → approval gate → post-approval
+- `lead_intake` — 6-module pipeline: WiseAgent lookup → property match → dedup → drafts → approval gate → post-approval. Handles commercial (Crexi/LoopNet/BizBuySell) and residential (Realtor.com/Seller Hub/Social Connect/UpNest) sources.
+- `lead_conversation` — 4-module pipeline: classify reply → generate response → approval gate → post-approval. Source-branched prompts (commercial/residential buyer/residential seller) with rigid frameworks.
 - `message_router` — Routes to rrg-pnl or rrg-brochure
 - `gmail_pubsub_webhook` — Gmail Pub/Sub handler (lead detection, SENT matching, reply detection)
 
@@ -50,8 +50,14 @@ rrg-server/
 ## Windmill Resources & Variables
 
 Resources: `wiseagent_oauth`, `gmail_oauth`, `gmail_leads_oauth`, `pg`, `tailscale_machines`
-Variables: `property_mapping`, `gmail_last_history_id`, `gmail_leads_last_history_id`, `sms_gateway_url`, `router_token`
+Variables: `property_mapping`, `gmail_last_history_id`, `gmail_leads_last_history_id`, `sms_gateway_url`, `router_token`, `email_signatures`
 (All under `f/switchboard/` namespace)
+
+**Lead sources & signers:**
+- **Commercial** (Crexi, LoopNet, BizBuySell) — signed by Larry
+- **Residential buyer** (Realtor.com, UpNest buyer) — signed by Andrea
+- **Residential seller** (Seller Hub, Social Connect, UpNest seller) — signed by Andrea
+- Signer determination: `f/switchboard/email_signatures` variable (template prefix → signer, source → signer, with in-flight thread continuity via `template_used`)
 
 ## Deployment
 
