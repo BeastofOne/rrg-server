@@ -239,6 +239,22 @@ All tests triggered via Windmill API (`run/f/f/switchboard/lead_intake` and `lea
 
 ---
 
+## Phase 4 Verification Results (Feb 26, 2026)
+
+### LoopNet E2E
+- **Intake:** Template `commercial_first_outreach_template`, signed Larry ✓ (was Jake in old code)
+- **Property match:** 1480 Parkwood Ave - Ypsilanti matched ✓
+- **Draft + SMS:** Both created ✓
+- **Conversation reply (tour request):** Classified `INTERESTED/WANT_SOMETHING`, wants=`["tour"]`, response on-topic with Larry's phone ✓
+
+### BizBuySell E2E
+- **Intake:** Template `commercial_first_outreach_template`, signed Larry ✓
+- **Property match:** 1480 Parkwood Ave - Ypsilanti matched ✓
+- **Draft + SMS:** Both created ✓
+- **Conversation reply (not interested):** Classified `NOT_INTERESTED`, gracious close, no pushiness, no property details ✓
+
+---
+
 ## Phase 4: LoopNet & BizBuySell Testing (Issue 3)
 
 Trigger real test leads from LoopNet and BizBuySell through the full pipeline after Phases 1-2 are complete. Same E2E testing approach as the Crexi testing done earlier today. No code changes expected — just test runs and bug fixing whatever comes up.
