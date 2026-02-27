@@ -223,14 +223,25 @@ def generate_response_with_claude(classify_result, response_type, sender_name, p
     reply_body = classify_result.get("reply_body", "")
 
     # Determine lead type for prompt selection
-    src = source.lower()
-    is_residential_seller = src in ("seller hub", "social connect", "upnest")
-    is_residential_buyer = src in ("realtor.com",)
-    # UpNest buyers also match is_residential_seller by source — check template_used
+    # Prefer explicit lead_type field; fall back to source/template_used inference
+    lead_type = classify_result.get("lead_type", "")
     template_used = classify_result.get("template_used", "")
-    if template_used == "residential_buyer":
+
+    if lead_type == "seller":
+        is_residential_seller = True
+        is_residential_buyer = False
+    elif lead_type == "buyer":
         is_residential_seller = False
         is_residential_buyer = True
+    else:
+        # Fallback: infer from source and template_used (pre-lead_type behavior)
+        src = source.lower()
+        is_residential_seller = src in ("seller hub", "social connect", "upnest")
+        is_residential_buyer = src in ("realtor.com",)
+        # UpNest buyers also match is_residential_seller by source — check template_used
+        if template_used == "residential_buyer":
+            is_residential_seller = False
+            is_residential_buyer = True
 
     # Build property context
     prop_details = []

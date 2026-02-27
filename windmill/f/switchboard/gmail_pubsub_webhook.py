@@ -929,7 +929,8 @@ def find_outreach_by_thread(thread_id):
         "wiseagent_client_id": matched_draft.get("wiseagent_client_id"),
         "has_nda": matched_draft.get("has_nda", False),
         "properties": matched_draft.get("properties", []),
-        "template_used": matched_draft.get("template_used", "")
+        "template_used": matched_draft.get("template_used", ""),
+        "lead_type": matched_draft.get("lead_type", "")
     }
 
 

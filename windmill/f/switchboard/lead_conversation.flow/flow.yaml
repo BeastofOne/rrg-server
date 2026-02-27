@@ -73,6 +73,9 @@ schema:
     lead_email:
       type: string
       description: Lead email address
+    lead_type:
+      type: string
+      description: Lead type (buyer or seller) for prompt selection
     lead_name:
       type: string
       description: Lead name

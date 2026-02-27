@@ -265,7 +265,8 @@ def main(grouped_data: dict):
             "is_followup": is_followup,
             "wiseagent_client_id": lead.get("wiseagent_client_id"),
             "properties": properties,
-            "notification_message_ids": lead.get("notification_message_ids", [])
+            "notification_message_ids": lead.get("notification_message_ids", []),
+            "lead_type": lead.get("lead_type", "")
         }
 
         # --- Template selection (order matters) ---
