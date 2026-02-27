@@ -59,7 +59,6 @@ def main(email: str):
             )
             conn.commit()
             cur.close()
-            conn.close()
             return {"email": email_lower, "skipped": True, "reason": "no_unprocessed_leads"}
 
         # 2. Mark them as processed (claim them so a concurrent job doesn't double-process)
