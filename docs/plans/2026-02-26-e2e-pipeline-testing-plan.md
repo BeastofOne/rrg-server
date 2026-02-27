@@ -116,7 +116,7 @@ Replace all 4 call sites (rejection note ~line 108, status update ~line 185, out
 
 **Step 2: Add `wa_post()` helper to Module D**
 
-Same extraction in `lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py`. Replace all 3 call sites.
+Same extraction in `lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py`. Replace both call sites (rejection note ~line 108, reply note ~line 191). Note: `get_wa_token()` uses a different endpoint (`TOKEN_URL`), not `wa_post()`.
 
 **Step 3: Push to Windmill and verify**
 
@@ -124,7 +124,7 @@ Same extraction in `lead_conversation.flow/post_approval_(crm_+_sms).inline_scri
 wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
-Seed one test lead through lead_intake, send the draft. Verify Module F output matches pre-refactor behavior: CRM status updated, outreach note added, SMS note added. Then seed a conversation reply, send the reply draft. Verify Module D output matches.
+Seed one test lead through lead_intake, send the draft. Verify Module F email_sent path matches pre-refactor behavior: CRM status updated, outreach note added, SMS note added. Then seed another lead, and DELETE the draft to verify the rejection path: Module F should add a rejection note via `wa_post()`. Then seed a conversation reply, send the reply draft. Verify Module D output matches.
 
 **Step 4: Commit**
 
@@ -215,7 +215,12 @@ git commit -m "fix: roll back signal to pending when resume fails (C4)"
 
 **Step 1: Implement all 5 changes locally**
 
-See design doc section "Propagate lead_type as First-Class Field" for exact changes per file.
+Per-file specifics:
+1. **Module D draft dict** (`generate_drafts_+_gmail.inline_script.py`): Add `"lead_type": lead.get("lead_type", "")` to the draft dict (around line 256-269, alongside `has_nda`).
+2. **Webhook** (`gmail_pubsub_webhook.py`): In `find_outreach_by_thread()`, add `"lead_type": matched_draft.get("lead_type", "")` to the return dict (around line 922-933).
+3. **Conversation Module A** (`fetch_thread_+_classify_reply.inline_script.py`): Read `lead_type` from the incoming `reply_data` dict and include it in the return dict. Without this, `lead_type` enters from the webhook but gets dropped before Module B sees it.
+4. **Conversation Module B** (`generate_response_draft.inline_script.py`): Check `lead_type` directly for buyer vs seller prompt selection, instead of inferring from `template_used`.
+5. **Flow schema** (`flow.yaml`): Add `lead_type: type: string` to the input schema.
 
 **Step 2: Push ALL 5 files in one push**
 
@@ -377,7 +382,7 @@ wmill sync push --skip-variables --skip-secrets --skip-resources
 
 **Step 4: Verify**
 
-Seed a Crexi test lead. Check draft headers for BCC field. Send the draft. Verify leads@ got a copy AND the BCC copy was skipped by the webhook (no phantom intake).
+Seed a Crexi test lead. Check intake draft headers for BCC field. Send the draft. Verify leads@ got a copy AND the BCC copy was skipped by the webhook (no phantom intake). Then seed a conversation reply to create a reply draft — check that reply draft also has BCC header set to `leads@resourcerealtygroupmi.com`.
 
 **Step 5: Commit**
 
@@ -415,17 +420,22 @@ git commit -m "fix: always close Postgres connections on errors (try/finally in 
 
 ---
 
-### Task 11: Remove silent failure on signal status update (I8)
+### Task 11: Remove silent failure on signal status update (I8) + write_crm_note
 
 **Files:**
 - Modify: `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py` (`mark_signal_acted()`)
 - Modify: `windmill/f/switchboard/lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py` (`mark_signal_acted()`)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (`write_crm_note()`)
 
-**Step 1: Remove `except: pass` from `mark_signal_acted()` in both files**
+**Step 1: Remove `except: pass` from `mark_signal_acted()` in both Module F and Module D files**
 
 Let the exception propagate. It runs before any CRM/SMS work, so no duplicate risk.
 
-**Step 2: Push and verify**
+**Step 2: Log `write_crm_note()` failures in conversation Module B**
+
+`write_crm_note()` (line 64-78 of `generate_response_draft.inline_script.py`) wraps the entire CRM note write in `except: pass`. Used for IGNORE, ERROR, and OFFER terminal paths. Replace with `except Exception as e: print(f"CRM note failed: {e}")` so the failure is at least logged in Windmill output. Don't crash the flow — CRM notes are supplementary to the signal+SMS alerts added by Tasks 15-19.
+
+**Step 3: Push and verify**
 
 ```bash
 wmill sync push --skip-variables --skip-secrets --skip-resources
@@ -433,12 +443,13 @@ wmill sync push --skip-variables --skip-secrets --skip-resources
 
 Send a pending test draft. Query jake_signals — confirm signal is acted.
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
 git add windmill/f/switchboard/lead_intake.flow/post_approval_\(crm_+_sms\).inline_script.py \
-        windmill/f/switchboard/lead_conversation.flow/post_approval_\(crm_+_sms\).inline_script.py
-git commit -m "fix: remove except:pass on mark_signal_acted, let Windmill retry (I8)"
+        windmill/f/switchboard/lead_conversation.flow/post_approval_\(crm_+_sms\).inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: remove except:pass on mark_signal_acted and write_crm_note (I8)"
 ```
 
 ---
@@ -473,6 +484,8 @@ git commit -m "fix: retry + alert + log on CRM contact creation failure"
 ---
 
 ### Task 13: CRM post-approval update resilience
+
+**Prerequisite:** Task 2 (S3 wa_post extraction). This task modifies the same CRM call sites in Module F. Task 2 extracts them into `wa_post()` first, so the retry logic here applies to the helper instead of 4 raw call sites.
 
 **Files:**
 - Modify: `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py` (CRM update block, lines 181-246)
@@ -782,6 +795,8 @@ git commit -m "fix: propagate has_nda into draft data for conversation engine"
 
 Commercial: "Talk soon, Larry" + (734) 732-3789. Residential: "Talk soon, Andrea" + (734) 223-1015.
 
+**Also fix `determine_signer()` default in conversation Module B.** Currently defaults to Larry for all lead types. Change the default to follow the same split: Larry for commercial, Andrea for residential/seller — matching the hardcoded fallbacks.
+
 **Step 2: Push and test directly**
 
 Temporarily rename `f/switchboard/email_signatures` variable. Seed one commercial and one residential lead. Verify correct fallback signatures. Rename variable back. Seed one more lead to confirm normal signatures resume.
@@ -836,6 +851,9 @@ git commit -m "fix: include lead_conversation signals in get_pending_draft_signa
 - Add UpNest to lead source list
 - Fix `wants` field: list of strings, not a string
 - Add BizBuySell, Social Connect, UpNest to unlabeled detection sources
+- Update Crexi source types: collapsed from 7 sub-types to just "crexi" (no more crexi_om, crexi_flyer, etc.)
+- Add `lead_type` field to conversation engine's reply_data schema documentation
+- Update webhook flow diagram to show current staging/delayed-processing pattern (not old direct-trigger)
 
 **Step 2: Commit**
 
@@ -882,6 +900,8 @@ Execute all 34 test cases from the design doc's Test Matrix. One test at a time,
 **Group 6: Conversation Special Prompts (Tasks 57-61, Tests 25-26, 32-34)**
 **Group 7: Conversation Approval Loop (Tasks 62-63, Tests 27-28)**
 
+**Dependency:** Groups 5-7 (conversation tests) require sent drafts from Groups 1-3 (intake tests) to create the Gmail threads that conversation replies are seeded into. Run Groups 1-4 first.
+
 Each test follows the execution flow from the design doc:
 1. Seed test email (or reply)
 2. Pub/Sub fires → webhook runs
@@ -892,7 +912,7 @@ Each test follows the execution flow from the design doc:
 7. Verify post-approval: signal status, CRM, SMS, BCC
 8. Checkpoint: fix or move on
 
-See the current implementation plan (above Task 0 through Group 7) for exact seed emails, verification steps, and expected outputs per test.
+See the design doc's Test Matrix for exact seed emails, verification steps, and expected outputs per test.
 
 ---
 

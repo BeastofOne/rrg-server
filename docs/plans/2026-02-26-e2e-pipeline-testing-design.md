@@ -80,7 +80,7 @@ After all pre-test changes are implemented:
 
 ### Post-Implementation Code Review: Failure Paths
 
-Twelve of the pre-test fixes add retry/alert behavior for when external systems fail. These failure paths cannot be triggered in E2E testing without breaking live infrastructure. After all pre-test changes are implemented but BEFORE running the full E2E suite, do a dedicated code review of each failure path to verify the error handling is correct:
+Thirteen of the pre-test fixes add retry/alert behavior for when external systems fail. These failure paths cannot be triggered in E2E testing without breaking live infrastructure. After all pre-test changes are implemented but BEFORE running the full E2E suite, do a dedicated code review of each failure path to verify the error handling is correct:
 
 | Change | What to verify in code review |
 |--------|-------------------------------|
@@ -164,13 +164,13 @@ This code review is a gate — do not proceed to the full E2E suite until all th
 
 ## Pre-Test Cleanup: Extract WiseAgent API Helper in Module F and Module D
 
-**Problem:** Both Module F (lead_intake post-approval) and Module D (lead_conversation post-approval) repeat the same 5-line WiseAgent API call pattern multiple times. Module F has 4 call sites (contact note, status update, SMS note, rejection note). Module D has 3 call sites (rejection note at line 108, reply note at line 191, plus the same `get_wa_token()` OAuth refresh at line 21-45). The only things that change between call sites are the `requestType` and the `data`.
+**Problem:** Both Module F (lead_intake post-approval) and Module D (lead_conversation post-approval) repeat the same 5-line WiseAgent API call pattern multiple times. Module F has 4 call sites (contact note, status update, SMS note, rejection note). Module D has 2 call sites (rejection note at line 108, reply note at line 191). The `get_wa_token()` OAuth refresh at line 21-45 uses a different endpoint (`TOKEN_URL`) and is not a candidate for `wa_post()`. The only things that change between call sites are the `requestType` and the `data`.
 
 **Fix:** Extract a small `wa_post(token, request_type, data)` helper at the top of each file. Each call site becomes a one-liner. No behavior change — just means if you need to adjust timeout, headers, or error handling for WiseAgent calls, you do it in one place instead of three or four. Apply the same extraction to both files independently (they are separate Windmill scripts, so they cannot share imports).
 
 **Where:**
 - `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py` (Module F — 4 call sites)
-- `windmill/f/switchboard/lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py` (Module D — 3 call sites)
+- `windmill/f/switchboard/lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py` (Module D — 2 call sites)
 
 **Immediate verification:** Pure refactor for both files. Push to Windmill, then:
 - **Module F:** Send one pending test draft through lead_intake. Module F should produce the same CRM contact, CRM notes, and SMS as before. Compare Windmill job output before/after.
