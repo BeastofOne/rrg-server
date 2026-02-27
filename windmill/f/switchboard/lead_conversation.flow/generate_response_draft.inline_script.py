@@ -179,14 +179,20 @@ def get_signer_config():
     return json.loads(raw)
 
 
-def determine_signer(source, template_used, sig_config=None):
+def determine_signer(source, template_used, sig_config=None, lead_type=""):
     """Determine sender name, phone, and HTML signature based on source and template continuity."""
     if sig_config is None:
         sig_config = get_signer_config()
 
     signers = sig_config.get("signers", {})
     if not signers:
-        return "Larry", "(734) 732-3789", ""
+        # Hardcoded fallback when email_signatures config is missing
+        src = source.lower()
+        is_commercial = src in ("crexi", "loopnet", "bizbuysell") or template_used in ("lead_magnet", "commercial_first_outreach_template", "commercial_followup_template", "commercial_multi_property_first_contact", "commercial_multi_property_followup")
+        if is_commercial:
+            return "Larry", "(734) 732-3789", "Talk soon,<br>Larry<br>(734) 732-3789"
+        else:
+            return "Andrea", "(734) 223-1015", "Talk soon,<br>Andrea<br>(734) 223-1015"
 
     # Check template_used first (in-flight thread continuity)
     for prefix, signer_key in sig_config.get("template_prefix_to_signer", {}).items():
@@ -203,10 +209,18 @@ def determine_signer(source, template_used, sig_config=None):
             if signer:
                 return signer["name"], signer["phone"], signer["html_signature"]
 
-    # Default
-    default_key = sig_config.get("default_signer", "larry")
+    # Default — follow commercial/residential split based on source
+    src = source.lower()
+    is_commercial = src in ("crexi", "loopnet", "bizbuysell") or template_used in ("lead_magnet", "commercial_first_outreach_template", "commercial_followup_template", "commercial_multi_property_first_contact", "commercial_multi_property_followup")
+    if is_commercial:
+        default_key = sig_config.get("default_signer", "larry")
+    else:
+        default_key = "andrea"
     signer = signers.get(default_key, {})
-    return signer.get("name", "Larry"), signer.get("phone", "(734) 732-3789"), signer.get("html_signature", "")
+    if is_commercial:
+        return signer.get("name", "Larry"), signer.get("phone", "(734) 732-3789"), signer.get("html_signature", "")
+    else:
+        return signer.get("name", "Andrea"), signer.get("phone", "(734) 223-1015"), signer.get("html_signature", "")
 
 
 def generate_response_with_claude(classify_result, response_type, sender_name, phone):

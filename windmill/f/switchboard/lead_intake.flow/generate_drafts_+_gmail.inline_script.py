@@ -207,7 +207,12 @@ def get_html_signature(source, template_used, sig_config):
     """Look up the HTML signature for a given source/template from the signer config."""
     signers = sig_config.get("signers", {})
     if not signers:
-        return ""
+        # Hardcoded fallback when email_signatures config is missing
+        src = source.lower()
+        if src in ("crexi", "loopnet", "bizbuysell") or template_used in ("lead_magnet", "commercial_first_outreach_template", "commercial_followup_template", "commercial_multi_property_first_contact", "commercial_multi_property_followup"):
+            return "Talk soon,<br>Larry<br>(734) 732-3789"
+        else:
+            return "Talk soon,<br>Andrea<br>(734) 223-1015"
 
     # Check template_used first (in-flight thread continuity)
     for prefix, signer_key in sig_config.get("template_prefix_to_signer", {}).items():
