@@ -2,7 +2,8 @@
 # Part of f/switchboard/lead_conversation flow
 #
 # Routes based on Module A classification:
-# - IGNORE/ERROR → CRM note, skip (terminal)
+# - IGNORE → CRM note, skip (terminal)
+# - ERROR → signal + SMS alert, skip (terminal)
 # - OFFER → notification signal for Jake, skip (terminal)
 # - WANT_SOMETHING → look up docs, generate response draft
 # - GENERAL_INTEREST → generate follow-up draft
