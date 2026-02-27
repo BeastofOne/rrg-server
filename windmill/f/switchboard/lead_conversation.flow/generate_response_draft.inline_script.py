@@ -621,6 +621,16 @@ def main(classify_result: dict):
                 "original_signal_id": original_signal_id
             }
         )
+        if signal_id is None:
+            print(f"[main] OFFER signal write failed for thread {thread_id} — sending SMS fallback")
+            try:
+                requests.post(
+                    "http://100.125.176.16:8686/send-sms",
+                    json={"phone": "+17348960518", "message": f"OFFER signal write failed for thread {thread_id} — MANUAL FOLLOW-UP REQUIRED"},
+                    timeout=10
+                )
+            except Exception as sms_err:
+                print(f"[main] CRITICAL: OFFER SMS fallback also failed: {sms_err}")
         write_crm_note(
             wiseagent_client_id,
             f"Lead Reply - Offer Received",
