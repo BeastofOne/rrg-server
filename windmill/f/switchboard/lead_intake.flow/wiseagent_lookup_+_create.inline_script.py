@@ -139,8 +139,8 @@ def extract_field(response_data, field_name):
         return response_data.get(field_name)
     return None
 
-def log_contact_creation(lead, client_id):
-    """Log new contact creation to contact_creation_log table (BUG 7A)."""
+def log_contact_creation(lead, client_id, status="created"):
+    """Log contact creation to contact_creation_log table (BUG 7A)."""
     try:
         import psycopg2
         pg = wmill.get_resource("f/switchboard/pg")
@@ -153,8 +153,8 @@ def log_contact_creation(lead, client_id):
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO public.contact_creation_log
-                (email, name, phone, source, source_type, wiseagent_client_id, property_name, raw_lead_data)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                (email, name, phone, source, source_type, wiseagent_client_id, property_name, raw_lead_data, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
             """, (
                 lead.get("email", ""),
                 lead.get("name", ""),
@@ -163,7 +163,8 @@ def log_contact_creation(lead, client_id):
                 lead.get("source_type", ""),
                 str(client_id) if client_id else None,
                 lead.get("property_name", ""),
-                json.dumps(lead)
+                json.dumps(lead),
+                status
             ))
             conn.commit()
             cur.close()
@@ -211,30 +212,52 @@ def main(leads: list):
             phone = lead.get("phone", "")
             if phone:
                 create_data["MobilePhone"] = phone
-            try:
-                resp = requests.post(
-                    BASE_URL + "?requestType=webcontact", data=create_data,
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                    timeout=15
-                )
-                resp.raise_for_status()
-                create_resp = resp.json()
-                client_id = extract_field(create_resp, "ClientID") or extract_field(create_resp, "clientID")
+            # Retry CRM contact creation up to 3 times
+            client_id = None
+            last_error = None
+            for attempt in range(3):
+                try:
+                    resp = requests.post(
+                        BASE_URL + "?requestType=webcontact", data=create_data,
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+                        timeout=15
+                    )
+                    resp.raise_for_status()
+                    create_resp = resp.json()
+                    client_id = extract_field(create_resp, "ClientID") or extract_field(create_resp, "clientID")
+                    last_error = None
+                    break
+                except Exception as e:
+                    last_error = e
+                    print(f"[CRM Create] Attempt {attempt + 1}/3 failed for {email}: {e}")
+                    if attempt < 2:
+                        time.sleep(2)
+
+            if last_error is None and client_id:
+                # Success path
                 result["wiseagent_client_id"] = client_id
                 result["is_new"] = True
-                result["is_followup"] = False  # New contact = never a followup
+                result["is_followup"] = False
                 result["has_nda"] = False
-                # Log creation for audit/batch-fix purposes (BUG 7A)
-                log_contact_creation(lead, client_id)
-                # Write lead intake note for new contacts too
-                if client_id:
-                    write_lead_intake_note(token, client_id, lead.get("source", ""), lead.get("property_name", ""))
-            except Exception as e:
-                # If creation fails, continue without client_id
+                log_contact_creation(lead, client_id, status="created")
+                write_lead_intake_note(token, client_id, lead.get("source", ""), lead.get("property_name", ""))
+            else:
+                # Final failure — continue without client_id
                 result["wiseagent_client_id"] = None
                 result["is_new"] = True
                 result["is_followup"] = False
                 result["has_nda"] = False
-                result["crm_create_error"] = str(e)
+                result["crm_create_error"] = str(last_error) if last_error else "no client_id returned"
+                # SMS alert to Jake
+                try:
+                    requests.post(
+                        "http://100.125.176.16:8686/send-sms",
+                        json={"to": "+17348960518", "message": f"CRM contact creation failed for {email} after 3 attempts"},
+                        timeout=10
+                    )
+                except Exception:
+                    pass  # SMS failure must not crash the pipeline
+                # Log failure to DB
+                log_contact_creation(lead, None, status="failed")
         enriched.append(result)
     return enriched
