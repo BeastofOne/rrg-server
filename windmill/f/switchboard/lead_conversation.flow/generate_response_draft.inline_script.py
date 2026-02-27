@@ -532,8 +532,8 @@ RULES:
             body = re.sub(r'\s*```$', '', body)
         return body
     except Exception as e:
-        # Fallback to simple template
-        return f"Hey {first_name},\n\nThanks for getting back to me! I'd love to help. My direct line is {phone} — feel free to call anytime."
+        print(f"[generate_response] Claude CLI failed: {e}")
+        raise
 
 
 def main(classify_result: dict):
@@ -648,7 +648,29 @@ def main(classify_result: dict):
         response_type = "lead_magnet_redirect"
 
     # Generate response body with Claude
-    response_body = generate_response_with_claude(classify_result, response_type, sender_name, sender_phone)
+    try:
+        response_body = generate_response_with_claude(classify_result, response_type, sender_name, sender_phone)
+    except Exception as e:
+        print(f"[main] AI generation failed for thread {thread_id}: {e}")
+        write_notification_signal(
+            f"AI generation failed for thread {thread_id}",
+            {
+                "thread_id": thread_id,
+                "lead_email": lead_email,
+                "lead_name": lead_name,
+                "response_type": response_type,
+                "error": str(e)
+            }
+        )
+        try:
+            requests.post(
+                "http://100.125.176.16:8686/send-sms",
+                json={"phone": "+17348960518", "message": f"AI generation failed for thread {thread_id}"},
+                timeout=10
+            )
+        except Exception as sms_err:
+            print(f"[main] SMS alert also failed: {sms_err}")
+        return {"skipped": True, "reason": "ai_generation_failed"}
 
     # Create Gmail draft as reply in the same thread
     try:
