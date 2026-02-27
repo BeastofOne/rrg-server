@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Execute 33 end-to-end tests (+ 3 setup tasks) covering every branch of lead_intake and lead_conversation, fixing issues as they're found.
+**Goal:** Implement all pre-test code fixes discovered during code review, then execute the 34-test E2E suite covering every branch of lead_intake and lead_conversation.
 
-**Architecture:** Seed real notification emails into leads@ via Gmail API `messages.import`, let Pub/Sub naturally trigger the webhook, verify drafts in teamgotcher@, Jake manually approves/rejects, verify CRM + SMS. One test at a time, fix before moving on.
+**Architecture:** Three phases: (1) dependency issues with ordering constraints, (2) remaining pre-test fixes, (3) code review gate + full E2E suite. Each fix is pushed to live Windmill and micro-tested before committing.
 
-**Tech Stack:** Gmail API (messages.import), Windmill API (job verification), WiseAgent API (CRM verification), Postgres (signal verification)
+**Tech Stack:** Windmill (wmill CLI), Gmail API (messages.import), WiseAgent API, Postgres (psql via SSH), SMS gateway (pixel-9a)
 
 ---
 
@@ -18,824 +18,891 @@
 - Windmill API token: `windmill.api_token`
 - WiseAgent OAuth: via Windmill resource `f/switchboard/wiseagent_oauth`
 
-**Test contact naming:** All test contacts use `TEST - [Name]` prefix in WiseAgent.
-
-**Test email recipient:** `jacob@resourcerealtygroupmi.com` for all drafts.
-
-**Test SMS recipient:** `(734) 896-0518` for all leads with phone numbers.
-
-**Property for commercial tests:** `1480 Parkwood Ave - Ypsilanti` (canonical name, exists in property_mapping).
-
-**Second property for multi-property tests:** `CMC Transportation - Ypsilanti` (exists in property_mapping).
-
----
-
-## Pre-Flight Checks (Before Any Tests)
-
-Run these before starting Task 1:
-
-1. **Verify `messages.import` triggers Pub/Sub:** Seed a throwaway email into leads@ and confirm the webhook fires within ~15 seconds. If it doesn't, switch to `messages.insert` with `internalDateSource=receivedTime` and explicit `INBOX` label ID.
-
-2. **Verify SMS gateway is reachable:** `curl -s http://100.125.176.16:8686/` — if unreachable, SMS tests will fail.
-
-3. **Verify WiseAgent OAuth token:** Make a test API call to WiseAgent via Windmill to confirm the token refreshes correctly. Module A depends on this for every test.
-
-4. **Refresh Gmail tokens:** Get fresh access tokens for both leads@ and teamgotcher@ accounts. Tokens expire every hour — refresh again if the session runs long.
-
----
-
-## Cleanup Helpers (Between Test Re-Runs)
-
-If a test fails and needs to be re-run, clean up stale state first:
-
-```sql
--- Clear staged leads for the test email
-DELETE FROM staged_leads WHERE lower(email) = 'jacob@resourcerealtygroupmi.com' AND NOT processed;
-
--- Clear batch timer for the test email
-DELETE FROM processed_notifications WHERE key LIKE 'timer:%jacob@resourcerealtygroupmi.com%';
+**Windmill push command (ALWAYS use safe flags):**
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
-Also delete any orphaned drafts in teamgotcher@ and pending signals in jake_signals for the test contact.
+**Rollback:** If any change breaks the pipeline, push the known-good main branch code:
+```bash
+cd ~/rrg-server && wmill sync push --skip-variables --skip-secrets --skip-resources
+```
 
 ---
 
-## Task 0: Pre-Test Code Change — BCC leads@ on All Outbound Emails
+## Phase 1: Dependency Issues (8 tasks)
 
-**Why:** Larry wants all office agents to see outbound lead emails. leads@ is a shared inbox.
+These have ordering constraints. Implement in this exact order.
+
+---
+
+### Task 1: Create oauth_token_backup table (C2 prerequisite)
+
+**Why:** The C2 OAuth resilience code writes to this table. It must exist before the code is deployed.
+
+**Step 1: Create the table on rrg-server Postgres**
+
+```bash
+ssh andrea@rrg-server
+psql -U rrg -d rrg -c "
+CREATE TABLE public.oauth_token_backup (
+    service     TEXT PRIMARY KEY,
+    token_data  JSONB NOT NULL,
+    saved_at    TIMESTAMPTZ DEFAULT NOW()
+);
+"
+```
+
+**Step 2: Verify the table exists**
+
+```bash
+psql -U rrg -d rrg -c "\d public.oauth_token_backup"
+```
+
+Expected: table with columns `service`, `token_data`, `saved_at`.
+
+**Step 3: Add status column to contact_creation_log (for CRM resilience fixes)**
+
+```bash
+psql -U rrg -d rrg -c "
+ALTER TABLE public.contact_creation_log ADD COLUMN status TEXT DEFAULT 'created';
+"
+```
+
+**Step 4: Verify**
+
+```bash
+psql -U rrg -d rrg -c "\d public.contact_creation_log"
+```
+
+Expected: new `status` column with default `'created'`.
+
+**Step 5: Commit**
+
+No code change — SQL only. Note in commit message.
+
+```bash
+git commit --allow-empty -m "chore: create oauth_token_backup table and add status column to contact_creation_log"
+```
+
+---
+
+### Task 2: Extract WiseAgent API helper (S3 — do before C2 code changes)
+
+**Why:** The C2 OAuth resilience and CRM retry fixes modify WiseAgent API call sites. Extracting the helper first means those fixes apply to one place per file instead of 4.
 
 **Files:**
-- Modify: `windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py` (the `create_gmail_draft` function)
-- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (the `create_reply_draft` function)
+- Modify: `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py`
+- Modify: `windmill/f/switchboard/lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py`
 
-**Step 1: Add BCC to lead_intake's create_gmail_draft**
+**Step 1: Add `wa_post()` helper to Module F**
 
-In `generate_drafts_+_gmail.inline_script.py`, find the `create_gmail_draft` function. After the line `if cc:` / `message['cc'] = cc`, add:
-
-```python
-    message['bcc'] = 'leads@resourcerealtygroupmi.com'
-```
-
-**Step 2: Add BCC to lead_conversation's create_reply_draft**
-
-In `generate_response_draft.inline_script.py`, find the `create_reply_draft` function. After the `In-Reply-To` / `References` headers, add:
+In `lead_intake.flow/post_approval_(crm_+_sms).inline_script.py`, add after the imports:
 
 ```python
-    message['bcc'] = 'leads@resourcerealtygroupmi.com'
+def wa_post(token, request_type, data):
+    """Make a WiseAgent API call."""
+    resp = requests.post(
+        BASE_URL + f"?requestType={request_type}",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15
+    )
+    resp.raise_for_status()
+    return resp
 ```
 
-**Step 3: Push to Windmill**
+Replace all 4 call sites (rejection note ~line 108, status update ~line 185, outreach note ~line 214, SMS note ~line 234) with one-liner `wa_post(token, "addContactNote", note_data)` or `wa_post(token, "updateContact", update_data)` calls.
+
+**Step 2: Add `wa_post()` helper to Module D**
+
+Same extraction in `lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py`. Replace all 3 call sites.
+
+**Step 3: Push to Windmill and verify**
 
 ```bash
 wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
+Seed one test lead through lead_intake, send the draft. Verify Module F output matches pre-refactor behavior: CRM status updated, outreach note added, SMS note added. Then seed a conversation reply, send the reply draft. Verify Module D output matches.
+
+**Step 4: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/post_approval_\(crm_+_sms\).inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/post_approval_\(crm_+_sms\).inline_script.py
+git commit -m "refactor: extract wa_post() helper in Module F and Module D"
+```
+
+---
+
+### Task 3: WiseAgent OAuth token save resilience (C2)
+
+**Why:** Silent `except: pass` on token save has caused two full outages. Fix all 4 files.
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/wiseagent_lookup_+_create.inline_script.py` (Module A `get_token()`)
+- Modify: `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py` (Module F `get_token()`)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (Module B `get_wa_token()`)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py` (Module D `get_wa_token()`)
+
+**Step 1: Update each `get_token()`/`get_wa_token()` function**
+
+In each file, replace the `except: pass` on `wmill.set_resource()` with:
+1. Save BEFORE using the new token
+2. Retry 2-3 times with brief pause
+3. On final failure: write to `oauth_token_backup` table via Postgres
+4. Log the error visibly in Windmill output
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed a test lead (exercises Module A). Send the draft (exercises Module F). Seed a conversation reply (exercises Module B). Send the reply draft (exercises Module D). Check Windmill job output for each — confirm "save first" ordering. Check `oauth_token_backup` table for a row if a refresh happened.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/wiseagent_lookup_+_create.inline_script.py \
+        windmill/f/switchboard/lead_intake.flow/post_approval_\(crm_+_sms\).inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/post_approval_\(crm_+_sms\).inline_script.py
+git commit -m "fix: add retry + Postgres backup for WiseAgent OAuth token save (C2)"
+```
+
+---
+
+### Task 4: Resume failure recovery (C4)
+
+**Why:** If resume call fails after signal marked acted, signal is stuck. Fix: roll back to pending on failure.
+
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (SENT processing path, after `trigger_resume()`)
+
+**Step 1: Add HTTP response check after `trigger_resume()`**
+
+After the `trigger_resume()` call in the SENT path, check the status code. If 5xx or timeout: UPDATE the signal back to `pending`, raise error. If 2xx/4xx: leave as acted.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed a test lead, send the draft. Verify signal is `status = 'acted'` and Module F completed. The rollback path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/gmail_pubsub_webhook.py
+git commit -m "fix: roll back signal to pending when resume fails (C4)"
+```
+
+---
+
+### Task 5: Propagate lead_type through pipeline (I6 — atomic deploy)
+
+**Why:** UpNest buyer/seller routing depends on this. All 5 files must be pushed together.
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py` (add `lead_type` to draft dict)
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (`find_outreach_by_thread()` — return `lead_type`)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/fetch_thread_+_classify_reply.inline_script.py` (pass `lead_type` through)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (use `lead_type` for prompt selection)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/flow.yaml` (add `lead_type` to schema)
+
+**Step 1: Implement all 5 changes locally**
+
+See design doc section "Propagate lead_type as First-Class Field" for exact changes per file.
+
+**Step 2: Push ALL 5 files in one push**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+**Step 3: Verify**
+
+Seed one UpNest buyer lead and one UpNest seller lead. After drafts appear, query jake_signals — confirm `lead_type` is `"buyer"` and `"seller"` in the signal detail JSON. Send the buyer draft, seed a reply, verify conversation engine selected residential BUYER prompt.
+
 **Step 4: Commit**
 
 ```bash
 git add windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py \
-        windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
-git commit -m "feat: BCC leads@ on all outbound lead emails"
+        windmill/f/switchboard/gmail_pubsub_webhook.py \
+        windmill/f/switchboard/lead_conversation.flow/fetch_thread_+_classify_reply.inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/flow.yaml
+git commit -m "feat: propagate lead_type as first-class field through pipeline (I6)"
 ```
 
 ---
 
-## Task 0A: Fix UpNest lead_type and city Fields Lost at Module C
+### Task 6: Don't mark leads as done until processed (C1)
 
-**Why:** Module C (dedup_and_group) builds a group dict per email but doesn't copy `lead_type` or `city` from the raw lead. This means ALL UpNest leads hit the `residential_seller` template regardless of buyer/seller type, and city extraction fails. This is a production bug.
+**Why:** If trigger call fails, leads are permanently marked handled but never processed.
 
 **Files:**
-- Modify: `windmill/f/switchboard/lead_intake.flow/dedup_and_group.inline_script.py` line 27
+- Modify: `windmill/f/switchboard/process_staged_leads.py`
 
-**Fix:** Add `"lead_type": lead.get("lead_type", ""), "city": lead.get("city", ""),` to the group dict on line 27.
+**Step 1: Implement claim/unclaim pattern**
 
-**Already done in this worktree.** Commit with the BCC change.
+After the intake trigger call, check HTTP response. On failure: set `processed = FALSE`, send SMS to Jake, raise error. Move timer lock deletion to success path only. Remove `except: pass` on timer lock delete.
 
----
-
-## Task 0B: Add Temporary Lead Magnet Property for Test 9
-
-**Why:** No properties in `property_mapping` currently have `lead_magnet: true`. Test 9 needs one.
-
-**Step 1: Add a lead_magnet entry to property_mapping via Windmill API**
-
-Add a test property like `"TEST Lead Magnet Property"` with `lead_magnet: true` and a `response_override`. Use the Windmill API to update the variable.
-
-**Step 2: After all testing, remove it**
-
----
-
-## Helper: How to Seed a Test Email
-
-Every test in Groups 1-3 follows this pattern. Get an access token for leads@, then use `messages.import`:
-
-```python
-# 1. Get access token for leads@
-curl -s -X POST https://oauth2.googleapis.com/token \
-  -d "client_id={claude_connector.client_id}" \
-  -d "client_secret={claude_connector.client_secret}" \
-  -d "refresh_token={leads.refresh_token}" \
-  -d "grant_type=refresh_token"
-
-# 2. Import email into leads@ inbox
-# messages.import places the message as if received, triggers Pub/Sub
-curl -X POST "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?internalDateSource=receivedTime" \
-  -H "Authorization: Bearer {access_token}" \
-  -H "Content-Type: message/rfc822" \
-  --data-binary @- <<'MIME'
-From: {fake_sender}
-To: leads@resourcerealtygroupmi.com
-Subject: {subject}
-Content-Type: text/plain; charset=utf-8
-
-{body}
-MIME
-```
-
----
-
-## Helper: How to Verify After Webhook Runs
-
-After seeding an email, wait ~10-15 seconds for Pub/Sub + webhook + pipeline, then:
+**Step 2: Push and verify**
 
 ```bash
-# 1. Check most recent webhook run
-curl -s "http://100.97.86.99:8000/api/w/rrg/jobs/list?script_path_exact=f/switchboard/gmail_pubsub_webhook&order_desc=true&per_page=1" \
-  -H "Authorization: Bearer {windmill_token}"
-# Look for: completed, no errors
-
-# 2. Check most recent lead_intake run (or process_staged_leads)
-curl -s "http://100.97.86.99:8000/api/w/rrg/jobs/list?script_path_exact=f/switchboard/lead_intake&order_desc=true&per_page=1" \
-  -H "Authorization: Bearer {windmill_token}"
-# Look for: running (suspended at approval gate)
-
-# 3. Check draft appeared in teamgotcher@
-# List drafts, find the new one, verify subject/body/signer/BCC
+wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
----
+Seed a test lead, let it process. Query `staged_leads` — rows `processed = TRUE`. Query `processed_notifications` — timer lock deleted. Check Windmill output for trigger success.
 
-## Helper: How to Verify After Approval
-
-After Jake sends a draft:
+**Step 3: Commit**
 
 ```bash
-# 1. Check signal status in Postgres (via Windmill)
-# Signal should be 'acted', acted_by='gmail_pubsub'
-
-# 2. Check lead_intake job completed (Module F ran)
-# Look for completed status
-
-# 3. Verify WiseAgent contact: status="Contacted", notes contain outreach
-# Use WiseAgent API to search by email
-
-# 4. Verify SMS received on Jake's phone
-
-# 5. Verify BCC copy arrived in leads@ inbox
+git add windmill/f/switchboard/process_staged_leads.py
+git commit -m "fix: unclaim leads and alert on trigger failure, delete timer lock only on success (C1)"
 ```
 
 ---
 
-## Group 1: Lead Intake — Source + Template
+### Task 7: City extraction for 4 residential sources (I5)
 
-### Task 1: Crexi — Commercial First Outreach
+**Why:** Draft templates say "selling your home in [city]" but city extraction is broken for most sources.
 
-**Seed email:**
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST David Johnson has opened your OM for 1480 Parkwood Ave - Ypsilanti`
-- Body:
-  ```
-  TEST David Johnson has opened the Offering Memorandum for 1480 Parkwood Ave - Ypsilanti in Ypsilanti.
-  jacob@resourcerealtygroupmi.com
-  (734) 896-0518
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (Seller Hub, Social Connect, Realtor.com parsers)
+- Modify: `windmill/f/switchboard/lead_intake.flow/property_match.inline_script.py` (set `property_address` for non-commercial)
+- Modify: `windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py` (`get_city()`)
 
-  Click below to access contact information for this buyer.
-  ```
+**Step 1: Update parsers**
 
-**Verify draft:**
-- Subject: `RE: Your Interest in 1480 Parkwood Ave - Ypsilanti`
-- Body contains: "Hey David", "I got your information off of Crexi", "1480 Parkwood Ave, Ypsilanti, MI", OM mention, NDA mention
-- Signer: Larry, phone (734) 732-3789
-- HTML signature: Larry's signature block
-- To: jacob@resourcerealtygroupmi.com
-- BCC: leads@resourcerealtygroupmi.com
+- Seller Hub: extract `property_address` from body ("Property Address: ...")
+- Social Connect: extract `property_address` from body
+- Realtor.com: make city extraction explicit
+- UpNest Buyer: already working (city from subject)
 
-**After Jake sends draft:**
-- WiseAgent: `TEST - David Johnson` contact created, status=Contacted, note with "Outreach" + "1480 Parkwood"
-- SMS received on (734) 896-0518
-- BCC copy in leads@ inbox
-- Signal status: acted
-
----
-
-### Task 2: LoopNet — Commercial First Outreach
-
-**Seed email:**
-- From: `leads@loopnet.com`
-- Subject: `TEST Mark Thompson favorited 1480 Parkwood Ave - Ypsilanti`
-- Body:
-  ```
-  A LoopNet user has favorited your listing.
-
-  Contact Name: TEST Mark Thompson
-  Email: jacob@resourcerealtygroupmi.com
-  Phone: (734) 896-0518
-  ```
-
-**Verify draft:**
-- Subject: `RE: Your Interest in 1480 Parkwood Ave - Ypsilanti`
-- Body: "Hey Mark", "I got your information off of LoopNet", OM mention, NDA mention
-- Signer: Larry
-- To: jacob@resourcerealtygroupmi.com
-
-**Note:** Real LoopNet leads often have name only (no email/phone). This test includes email/phone to verify the full template path. A no-email LoopNet lead would be silently dropped at Module C dedup — same behavior as Task 14.
-
----
-
-### Task 3: BizBuySell — Commercial First Outreach
-
-**Seed email:**
-- From: `notifications@bizbuysell.com`
-- Subject: `Your Business-for-sale listing 1480 Parkwood Ave - Ypsilanti`
-- Body:
-  ```
-  You have received a new inquiry about your listing.
-
-  Contact Name: TEST Sarah Williams
-  Contact Email: jacob@resourcerealtygroupmi.com
-  Contact Phone: (734) 896-0518
-
-  Message: I'm interested in learning more about this property.
-  ```
-
-**Verify draft:**
-- Subject: `RE: Your Interest in 1480 Parkwood Ave - Ypsilanti`
-- Body: "Hey Sarah", "I got your information off of BizBuySell", OM mention, NDA mention
-- Signer: Larry
-
----
-
-### Task 4: Realtor.com — Residential Buyer
-
-**Seed email:**
-- From: `leads@email.realtor.com`
-- Subject: `New realtor.com lead: 123 Test Ave, Ann Arbor`
-- Body:
-  ```
-  You have a new lead from Realtor.com.
-
-  First Name: TEST
-  Last Name: Emily
-  Name: TEST Emily Carter
-  Email Address: jacob@resourcerealtygroupmi.com
-  Phone Number: (734) 896-0518
-  Property: 123 Test Ave, Ann Arbor
-  ```
-
-**Verify draft:**
-- Subject: `RE: Your Realtor.com inquiry in 123 Test Ave, Ann Arbor`
-- Body: "Hey Emily" (or "Hey there" if first name validation fails on "TEST"), "Realtor.com inquiry", "sooner the better", "(734) 223-1015"
-- Signer: Andrea
-- HTML signature: Andrea's signature block
-
-**Note:** The `TEST` prefix in the name may cause first-name validation to use "there" since "TEST" isn't in the SSA name list. Observe this — it may be acceptable or we may want to handle it.
-
----
-
-### Task 5: Seller Hub — Residential Seller
-
-**Seed email:**
-- From: `notifications@sellerappointmenthub.com`
-- Subject: `New Verified Seller Lead - TEST Robert Davis`
-- Body:
-  ```
-  New Verified Seller Lead
-
-  Seller Name: TEST Robert Davis
-  Email: jacob@resourcerealtygroupmi.com
-  Phone Number: (734) 896-0518
-  Property Address: 456 Test St, Ypsilanti, MI 48197
-  ```
-
-**Verify draft:**
-- Subject: `Introductions, Selling your home?`
-- Body: "Hey Robert" (or "Hey there"), "selling your home in Ypsilanti", "I got your information off of Seller Hub", "(734) 223-1015"
-- Signer: Andrea
-
----
-
-### Task 6: Social Connect — Residential Seller
-
-**Seed email:**
-- From: `leads@topproducer.com`
-- Subject: `New Lead: TEST Jennifer Brown from Social Connect`
-- Body:
-  ```
-  Name
-  TEST Jennifer Brown
-  Email
-  jacob@resourcerealtygroupmi.com
-  Phone
-  (734) 896-0518
-  Source
-  Social Connect
-  Property
-  789 Test Blvd, Saline, MI
-  ```
-
-**Verify draft:**
-- Subject: `Introductions, Selling your home?`
-- Body: "Hey Jennifer" (or "Hey there"), "selling your home", "Social Connect", "(734) 223-1015"
-- Signer: Andrea
-
----
-
-### Task 7: UpNest Buyer — Residential Buyer
-
-**Seed email:**
-- From: `notifications@upnest.com`
-- Subject: `Lead claimed: Buyer TEST Lisa Martinez in Pinckney`
-- Body:
-  ```
-  TEST Lisa Martinez
-  City:
-  Pinckney
-  Phone:
-  (734) 896-0518
-  Email:
-  jacob@resourcerealtygroupmi.com
-  ```
-
-**Verify draft:**
-- Subject: `Introductions, Buying a home?`
-- Body: "Hey Lisa" (or "Hey there"), "purchase a home in Pinckney", "UpNest", "(734) 223-1015"
-- Signer: Andrea
-- lead_type: buyer
-
----
-
-### Task 8: UpNest Seller — Residential Seller
-
-**Seed email:**
-- From: `notifications@upnest.com`
-- Subject: `Lead claimed: Seller TEST Kevin Wilson in Dexter`
-- Body:
-  ```
-  TEST Kevin Wilson
-  City:
-  Dexter
-  Phone:
-  (734) 896-0518
-  Email:
-  jacob@resourcerealtygroupmi.com
-  ```
-
-**Verify draft:**
-- Subject: `Introductions, Selling your home?`
-- Body: "Hey Kevin" (or "Hey there"), "selling your home in Dexter", "UpNest", "(734) 223-1015"
-- Signer: Andrea
-- lead_type: seller
-
----
-
-### Task 9: Lead Magnet Property
-
-**Prerequisite:** Task 0B (temporary lead_magnet property in property_mapping).
-
-**Seed email:** Crexi notification referencing the test lead_magnet property name.
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST Chris Adams has opened your OM for TEST Lead Magnet Property`
-- Body:
-  ```
-  TEST Chris Adams has opened the Offering Memorandum for TEST Lead Magnet Property.
-  jacob@resourcerealtygroupmi.com
-  (734) 896-0518
-
-  Click below to access contact information for this buyer.
-  ```
-
-**Verify draft:**
-- Subject: `RE: Your Interest in TEST Lead Magnet Property`
-- Body: "no longer available", "similar properties", NDA mention, "(734) 732-3789"
-- Signer: Larry (lead magnets are commercial, signed Larry)
-- Template: lead_magnet
-
----
-
-### Task 9B: Crexi Info Request (Separated Path)
-
-**Why:** `crexi_info_request` leads are separated from standard leads at Module C — they go into a separate `info_requests` list. No draft is created, but they're logged in the signal payload. This tests that the separation works and doesn't break the flow.
-
-**Seed email:**
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST Alex Rivera is requesting information for 1480 Parkwood Ave - Ypsilanti`
-- Body:
-  ```
-  TEST Alex Rivera is requesting information about 1480 Parkwood Ave - Ypsilanti.
-  jacob@resourcerealtygroupmi.com
-  (734) 896-0518
-
-  Click below to access contact information for this buyer.
-  ```
-
-**Verify:**
-- `determine_crexi_source_type()` returns `crexi_info_request` (contains "requesting information")
-- Module C separates this into `info_requests` list (not `standard_leads`)
-- Module D: `info_request_count: 1` in summary, no draft created for this lead
-- If this is the ONLY lead in the batch: Module E should get `skipped: true` (no drafts to approve) and flow completes without suspension
-- If combined with another lead: info_request appears in signal detail but doesn't generate its own draft
-
-**Note:** Seed this alone (not combined with another lead) to test the clean "no-draft" completion path.
-
----
-
-## Group 2: Commercial Branching
-
-### Task 10: Commercial Single Property — Followup
-
-**Prerequisite:** Task 1 must be completed (David Johnson exists in WiseAgent with "Lead Intake" note).
-
-**Seed email:** Another Crexi notification for the SAME contact (David Johnson) but DIFFERENT property.
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST David Johnson has opened your OM for CMC Transportation in Ypsilanti`
-- Body:
-  ```
-  TEST David Johnson has opened the Offering Memorandum for CMC Transportation in Ypsilanti.
-  jacob@resourcerealtygroupmi.com
-  (734) 896-0518
-
-  Click below to access contact information for this buyer.
-  ```
-
-**Verify draft:**
-- Template: `commercial_followup_template` (NOT first outreach)
-- Body: "I see you checked out another property", shorter than first outreach, NO NDA mention
-- is_followup=true in the pipeline output
-
----
-
-### Task 11: Commercial Multi-Property — First Contact
-
-**Seed TWO emails within 30 seconds** for the same new contact, different properties. The batch window (30s) should group them.
-
-**Email 1:**
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST Amanda Garcia has opened your OM for 1480 Parkwood Ave - Ypsilanti`
-- Body: standard Crexi format with `jacob@resourcerealtygroupmi.com` and `(734) 896-0518`
-
-**Email 2 (within 30 seconds):**
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST Amanda Garcia has downloaded the flyer for CMC Transportation in Ypsilanti`
-- Body: standard Crexi format with same email/phone
-
-**Verify draft:**
-- Template: `commercial_multi_property_first_contact`
-- Body: "you checked out 1480 Parkwood Ave in Ypsilanti and CMC Transportation - Ypsilanti" (inline property list)
-- Single draft (not two separate drafts)
-
----
-
-### Task 12: Commercial Multi-Property — Followup
-
-**Prerequisite:** Task 11 must be completed (Amanda Garcia exists with "Lead Intake" note).
-
-**Seed TWO more emails for Amanda Garcia**, different properties.
-
-**Verify draft:**
-- Template: `commercial_multi_property_followup`
-- Body: "you checked out a few more of my listings"
-- Shortest template
-
----
-
-## Group 3: Edge Cases
-
-### Task 13: Company Name (Not a Person)
-
-**Seed email:** Crexi notification with a company name instead of a person name.
-- From: `notifications@notifications.crexi.com`
-- Subject: `TEST Bridgerow Blinds has opened your OM for 1480 Parkwood Ave - Ypsilanti`
-- Body:
-  ```
-  TEST Bridgerow Blinds has opened the Offering Memorandum for 1480 Parkwood Ave - Ypsilanti in Ypsilanti.
-  jacob@resourcerealtygroupmi.com
-  (734) 896-0518
-
-  Click below to access contact information for this buyer.
-  ```
-
-**Verify draft:**
-- Greeting: "Hey there," (NOT "Hey Bridgerow,")
-- Rest of template is normal commercial first outreach
-
----
-
-### Task 14: Lead with No Email
-
-**Seed email:** LoopNet notification with name but no email in body.
-- From: `leads@loopnet.com`
-- Subject: `TEST NoEmail Person favorited 1480 Parkwood Ave - Ypsilanti`
-- Body:
-  ```
-  A LoopNet user has favorited your listing.
-  ```
-
-**Verify:**
-- Pipeline runs but Module E returns `skipped: true`
-- No draft created, no zombie flow
-- Windmill job completes cleanly (not suspended)
-
----
-
-### Task 15: Batch Window — Same Person, Two Notifications
-
-This is the same mechanism as Task 11 (multi-property). Verify the staging + 30s batch window works.
-
-**Seed TWO emails rapidly** for the same new contact to the same property (e.g., OM view + phone click).
-
-**Verify:**
-- Both notifications staged in `staged_leads`
-- Only ONE `lead_intake` flow triggered
-- Single draft created (not two)
-
----
-
-### Task 16: Fuzzy Property Dedup
-
-**Seed TWO emails for the same contact** with property name variants:
-- Email 1: subject contains `CMC Transportation`
-- Email 2: subject contains `CMC Transportation in Ypsilanti`
-
-**Verify:**
-- Module C deduplicates to a single property
-- Longer name kept (`CMC Transportation in Ypsilanti` or mapped `CMC Transportation - Ypsilanti`)
-- Single-property template selected (NOT multi-property)
-
----
-
-## Group 4: Approval Loop
-
-### Task 17: Send Draft — Full Approval
-
-**Use:** One of the drafts from Group 1 that hasn't been sent yet.
-
-**Jake action:** Open draft in Gmail, click Send.
-
-**Verify (within ~10 seconds):**
-1. Pub/Sub fires webhook
-2. Webhook detects SENT, matches thread_id to pending signal
-3. Signal marked `acted` in jake_signals
-4. Module F runs:
-   - WiseAgent contact status updated to "Contacted"
-   - CRM note added: "Outreach" + property name + "SMS sent to..."
-   - SMS CRM note added separately
-5. SMS received on (734) 896-0518
-6. BCC copy received in leads@ inbox
-7. Email received at jacob@resourcerealtygroupmi.com
-
----
-
-### Task 18: Delete Draft — Rejection
-
-**Use:** One of the remaining unsent drafts from Group 1 (e.g., Task 6 / Jennifer Brown / Social Connect).
-
-**Jake action:** Delete the draft in Gmail.
-
-**Manual resume:** The Apps Script daily poll normally detects deleted drafts. For testing, use the "How to Look Up resume_url for Manual Resume" helper above to find the pending signal's resume_url, then POST to it with `{ "action": "draft_deleted" }`.
-
-**Verify:**
-- Module F runs the rejection path
-- CRM note: "Lead rejected — draft deleted"
-- No SMS sent
-- Signal marked acted
-
----
-
-### Task 19: Send Draft — Lead with No Phone
-
-**Use:** A test that had a lead with phone stripped out (or seed a new Crexi lead without phone).
-
-**Verify after sending:**
-- Module F runs
-- CRM note says "No phone number — SMS not sent"
-- No SMS attempt
-
----
-
-## Helper: How to Seed a Conversation Reply
-
-Group 5-7 tests require seeding a "reply" into teamgotcher@ that looks like a prospect responding to our outreach. The webhook's reply detection works by checking unlabeled inbox messages on teamgotcher@ against ACTED signals' thread_ids.
-
-**Requirements for reply detection to work:**
-1. The original outreach draft must have been **sent** (creating an ACTED signal with the thread_id)
-2. The seeded reply must land in **teamgotcher@** inbox (not leads@)
-3. The reply must be on the **same Gmail thread** (use the same `threadId`)
-4. The reply must have proper threading headers (`In-Reply-To` and `References` matching the sent message's `Message-ID`)
-
-**Steps:**
+**Step 2: Push and verify each source**
 
 ```bash
-# 1. Find the thread_id from the ACTED signal for the test you want to reply to
-#    Query jake_signals for the test contact's signal:
-curl -s "http://100.97.86.99:8000/api/w/rrg/scripts/run_sync/f/switchboard/pg_query" \
-  -H "Authorization: Bearer {windmill_token}" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "SELECT id, detail->>'thread_id' as thread_id, detail->>'message_id' as message_id FROM jake_signals WHERE status='acted' AND summary LIKE '%TEST David%' ORDER BY created_at DESC LIMIT 1"}'
-
-# 2. Get a fresh access token for teamgotcher@
-curl -s -X POST https://oauth2.googleapis.com/token \
-  -d "client_id={rrg_gmail_automation.client_id}" \
-  -d "client_secret={rrg_gmail_automation.client_secret}" \
-  -d "refresh_token={teamgotcher.refresh_token}" \
-  -d "grant_type=refresh_token"
-
-# 3. Seed the reply into teamgotcher@ inbox with correct threading
-curl -X POST "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?internalDateSource=receivedTime" \
-  -H "Authorization: Bearer {teamgotcher_access_token}" \
-  -H "Content-Type: message/rfc822" \
-  --data-binary @- <<'MIME'
-From: jacob@resourcerealtygroupmi.com
-To: teamgotcher@gmail.com
-Subject: RE: Your Interest in 1480 Parkwood Ave - Ypsilanti
-In-Reply-To: <{message_id_from_step_1}>
-References: <{message_id_from_step_1}>
-Content-Type: text/plain; charset=utf-8
-
-{reply_text}
-MIME
+wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
-**Important:** The `threadId` returned by Gmail is NOT set via MIME headers — Gmail auto-threads based on `In-Reply-To`/`References` + subject. If Gmail doesn't auto-thread, you may need to use the `messages.insert` endpoint with an explicit `threadId` parameter in the JSON metadata.
+1. Seed Seller Hub lead with "Property Address: 456 Test St, Ypsilanti, MI 48197". Verify draft says "selling your home in Ypsilanti".
+2. Seed Social Connect lead with "789 Test Blvd, Saline, MI". Verify "selling your home in Saline".
+3. Seed UpNest buyer with "in Pinckney" in subject. Verify "purchase a home in Pinckney".
+4. Seed Realtor.com lead with "123 Test Ave, Ann Arbor". Verify city "Ann Arbor".
 
----
-
-## Helper: How to Look Up resume_url for Manual Resume
-
-For Task 18 (draft deletion/rejection), the Apps Script daily poll normally detects deleted drafts. For testing, manually resume the suspended flow:
+**Step 3: Commit**
 
 ```bash
-# 1. Find the pending signal for the test contact
-curl -s "http://100.97.86.99:8000/api/w/rrg/scripts/run_sync/f/switchboard/pg_query" \
-  -H "Authorization: Bearer {windmill_token}" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "SELECT id, resume_url FROM jake_signals WHERE status='pending' AND summary LIKE '%TEST%' ORDER BY created_at DESC LIMIT 5"}'
-
-# 2. POST to the resume_url with draft_deleted action
-curl -X POST "{resume_url}" \
-  -H "Content-Type: application/json" \
-  -d '{"action": "draft_deleted"}'
+git add windmill/f/switchboard/gmail_pubsub_webhook.py \
+        windmill/f/switchboard/lead_intake.flow/property_match.inline_script.py \
+        windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py
+git commit -m "fix: explicit city extraction for Seller Hub, Social Connect, Realtor.com (I5)"
 ```
 
 ---
 
-## Group 5: Lead Conversation — Classifications
+### Task 8: Collapse Crexi source types (deploy safely)
 
-**Prerequisites:** Tests from Group 4 must be completed (need ACTED signals with matching thread_ids). Use the "How to Seed a Conversation Reply" helper above.
+**Why:** 7 Crexi sub-types are unnecessary complexity. All Crexi leads are just "crexi".
 
-For each test below, seed a reply into teamgotcher@ inbox using the helper. The reply MUST be threaded to a specific completed outreach thread — see the "Thread source" note on each task.
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (delete `determine_crexi_source_type()`, replace call with `"crexi"`)
+- Modify: `windmill/f/switchboard/lead_intake.flow/property_match.inline_script.py` (update source_type check)
+- Modify: `windmill/f/switchboard/lead_intake.flow/dedup_and_group.inline_script.py` (delete info_request split)
 
-### Task 20: INTERESTED / WANT_SOMETHING
+**Step 1: Implement all 3 changes**
 
-**Thread source:** Reply to Task 1 (Crexi / David Johnson / commercial) thread.
+Delete `determine_crexi_source_type()`. Replace call site with `"crexi"`. Update `property_match` to accept `"crexi"` (temporarily also accept old values during transition). Delete lines 20-22 in `dedup_and_group` (info_request split).
 
-**Reply text:** "Can you send me the rent roll and financials?"
+**Step 2: Push during quiet period**
 
-**Verify:**
-- Claude classifies as INTERESTED / WANT_SOMETHING
-- Response draft mentions NDA requirement (commercial framework)
-- Signer: Larry (continues from original commercial outreach)
-- Draft created in same thread
-
----
-
-### Task 21: INTERESTED / GENERAL_INTEREST
-
-**Thread source:** Reply to Task 2 (LoopNet / Mark Thompson / commercial) thread.
-
-**Reply text:** "Thanks for reaching out! Tell me more about this property."
-
-**Verify:**
-- Claude classifies as INTERESTED / GENERAL_INTEREST
-- Response draft is a general follow-up
-- Signer: Larry (continues from original commercial outreach)
-
----
-
-### Task 22: INTERESTED / OFFER (Terminal)
-
-**Thread source:** Reply to Task 3 (BizBuySell / Sarah Williams / commercial) thread.
-
-**Reply text:** "I'd like to make an offer. Would you accept $400,000?"
-
-**Verify:**
-- Claude classifies as INTERESTED / OFFER
-- NO draft created (terminal)
-- Notification signal created in jake_signals
-- CRM note: "Offer received"
-- Flow stops at Module B (skipped=true)
-
----
-
-### Task 23: NOT_INTERESTED
-
-**Thread source:** Reply to Task 10 (Crexi followup / David Johnson / commercial) thread. This tests conversation on a followup-originated thread.
-
-**Reply text:** "Thanks but I'm not interested. Already found something."
-
-**Verify:**
-- Claude classifies as NOT_INTERESTED
-- Gracious apology draft created
-- Short, not pushy, leaves door open
-- Signer: Larry (continues from original commercial outreach)
-
----
-
-### Task 24: IGNORE (Auto-Reply)
-
-**Thread source:** Reply to Task 11 (Crexi multi-property / Amanda Garcia / commercial) thread. Tests conversation on a multi-property-originated thread.
-
-**Reply text:**
-```
-I am currently out of the office and will return on March 3rd.
-For urgent matters, please contact my assistant.
-This is an automated reply.
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
-**Verify:**
-- Claude classifies as IGNORE
-- NO draft created (terminal)
-- CRM note: "Automated/empty reply received" + IGNORE
-- Flow stops at Module B (skipped=true)
+**Step 3: Verify**
+
+Seed one Crexi OM lead and one Crexi info request. Both should get `source_type: "crexi"`, both should produce drafts. Verify Module C has zero info_requests.
+
+**Step 4: After 1 minute, push final version**
+
+Remove the transitional old values from `property_match` — only accept `"crexi"`.
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+**Step 5: Commit**
+
+```bash
+git add windmill/f/switchboard/gmail_pubsub_webhook.py \
+        windmill/f/switchboard/lead_intake.flow/property_match.inline_script.py \
+        windmill/f/switchboard/lead_intake.flow/dedup_and_group.inline_script.py
+git commit -m "fix: collapse Crexi source types to just 'crexi', remove info_request split"
+```
 
 ---
 
-## Group 6: Lead Conversation — Residential Prompts
+## Phase 2: Remaining Pre-Test Changes (14 tasks)
 
-### Task 25: Residential Buyer Reply (Realtor.com Thread)
-
-**Thread source:** Reply to Task 4 (Realtor.com / Emily Carter / residential buyer) thread.
-
-**Seed reply in teamgotcher@** using the conversation reply helper. Thread to Emily Carter's Realtor.com outreach.
-
-**Reply text:** "Yes! I'd love to schedule a tour. What times are available this weekend?"
-
-**Verify:**
-- Residential BUYER prompt framework used (not commercial)
-- Response mentions scheduling, home-buying language
-- Signer: Andrea, phone (734) 223-1015
-- No CRE jargon (no OM, no NDA)
+These are independent and can be done in any order. Grouped by file to minimize push/verify cycles.
 
 ---
 
-### Task 26: Residential Seller Reply (Seller Hub Thread)
+### Task 9: BCC leads@ + BCC filter (atomic deploy)
 
-**Thread source:** Reply to Task 5 (Seller Hub / Robert Davis / residential seller) thread.
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py` (add BCC header)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (add BCC header)
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (skip teamgotcher@ sender in leads@ processing)
 
-**Seed reply in teamgotcher@** using the conversation reply helper. Thread to Robert Davis's Seller Hub outreach.
+**Step 1: Add BCC to both draft creation functions**
 
-**Reply text:** "I'm thinking about selling but I'm not sure what my home is worth. Can you help?"
+Add `message['bcc'] = 'leads@resourcerealtygroupmi.com'` in both files.
 
-**Verify:**
-- Residential SELLER prompt framework used
-- Response mentions home value/CMA, selling process
-- Signer: Andrea, phone (734) 223-1015
-- No CRE jargon
+**Step 2: Add sender skip in webhook**
 
----
+Early in the INBOX message processing loop: if sender is `teamgotcher@gmail.com`, skip before parsing.
 
-## Group 7: Lead Conversation — Approval Loop
+**Step 3: Push ALL changes in one push**
 
-### Task 27: Send Conversation Reply Draft
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
 
-**Use:** The reply draft from Task 20 (WANT_SOMETHING / David Johnson commercial thread).
+**Step 4: Verify**
 
-**Jake action:** Send the draft in Gmail.
+Seed a Crexi test lead. Check draft headers for BCC field. Send the draft. Verify leads@ got a copy AND the BCC copy was skipped by the webhook (no phantom intake).
 
-**Verify:**
-- Pub/Sub → SENT detect → thread_id match → resume
-- Module D runs: CRM note ("Lead conversation reply sent"), SMS if applicable
-- Signal acted
+**Step 5: Commit**
 
----
-
-### Task 28: Delete Conversation Reply Draft
-
-**Use:** The reply draft from Task 21 (GENERAL_INTEREST / Mark Thompson commercial thread).
-
-**Jake action:** Delete the draft.
-
-**Verify:**
-- Resume with draft_deleted
-- Module D: rejection note in CRM
-- No SMS
+```bash
+git add windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py \
+        windmill/f/switchboard/gmail_pubsub_webhook.py
+git commit -m "feat: BCC leads@ on all outbound emails + filter to prevent loop"
+```
 
 ---
 
-## Cleanup
+### Task 10: Postgres try/finally cleanup (12 files)
 
-### After All Tests Complete
+**Files:** All 12 files listed in design doc "Always Close Postgres Connections on Errors" section.
 
-1. **WiseAgent:** Search for all contacts with `TEST -` prefix, delete them
-2. **Drafts:** Delete any remaining test drafts in teamgotcher@
-3. **Property mapping:** Remove the temporary lead_magnet test property (Task 0B)
-4. **Signals:** Test signals in jake_signals are already marked as acted — no cleanup needed
+**Step 1: Wrap all `psycopg2.connect()` call sites in try/finally or with statements**
+
+Structural change only — no behavior change. Go through each of the 12 files.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed one test lead through the full pipeline. Verify it completes identically to before. Check Postgres connection count before and after.
+
+**Step 3: Commit**
+
+```bash
+git add <all 12 files>
+git commit -m "fix: always close Postgres connections on errors (try/finally in 12 files)"
+```
+
+---
+
+### Task 11: Remove silent failure on signal status update (I8)
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py` (`mark_signal_acted()`)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/post_approval_(crm_+_sms).inline_script.py` (`mark_signal_acted()`)
+
+**Step 1: Remove `except: pass` from `mark_signal_acted()` in both files**
+
+Let the exception propagate. It runs before any CRM/SMS work, so no duplicate risk.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Send a pending test draft. Query jake_signals — confirm signal is acted.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/post_approval_\(crm_+_sms\).inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/post_approval_\(crm_+_sms\).inline_script.py
+git commit -m "fix: remove except:pass on mark_signal_acted, let Windmill retry (I8)"
+```
+
+---
+
+### Task 12: CRM contact creation resilience
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/wiseagent_lookup_+_create.inline_script.py` (CRM creation block, lines 179-203)
+
+**Step 1: Implement 4-layer resilience**
+
+1. Retry WiseAgent API call (3 attempts, 2s pause)
+2. On final failure: continue with `client_id = None`
+3. SMS to Jake + email to teamgotcher@
+4. Log to `contact_creation_log` with `status = 'failed'`
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed a test lead with new email. Verify CRM contact created, `contact_creation_log` row has `status = 'created'`. No SMS/email alert (success = silent). Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/wiseagent_lookup_+_create.inline_script.py
+git commit -m "fix: retry + alert + log on CRM contact creation failure"
+```
+
+---
+
+### Task 13: CRM post-approval update resilience
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/post_approval_(crm_+_sms).inline_script.py` (CRM update block, lines 181-246)
+
+**Step 1: Break single try/except into 3 independent blocks**
+
+Each block (status update, outreach note, SMS note) retries independently (3 attempts, 2s pause). On final failure: SMS to Jake, email to teamgotcher@, log to `contact_creation_log` with `status = 'crm_update_failed'` including which calls failed and the full text of each missed note.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Send a pending test draft. Verify all 3 CRM calls succeed on first try. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/post_approval_\(crm_+_sms\).inline_script.py
+git commit -m "fix: retry each CRM post-approval call independently, alert + log on failure"
+```
+
+---
+
+### Task 14: Fail webhook on trigger/scheduling failure (I2)
+
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py`
+
+**Step 1: Add two checks before history ID advancement**
+
+After the message processing loop but BEFORE history ID advance:
+1. Check if any INBOX_REPLY trigger failures were recorded — raise if found
+2. Check if any `schedule_results` entries have `error` key — raise if found
+
+Neither check raises inside its loop.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed one normal conversation reply and one normal lead. Verify both paths work — check Windmill job output for status code logging and scheduling success. Failure paths are code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/gmail_pubsub_webhook.py
+git commit -m "fix: block history ID advancement on trigger/scheduling failures (I2)"
+```
+
+---
+
+### Task 15: Stop pipeline on AI failure (I3)
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (~line 489-490)
+
+**Step 1: Replace generic fallback with signal + SMS**
+
+Remove the "Thanks for getting back to me!" canned response. On Claude failure: create jake_signals notification, send SMS, no draft, return `skipped: True`.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Run one normal conversation reply to confirm Claude generates a real response. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: stop pipeline and alert Jake on AI generation failure (I3)"
+```
+
+---
+
+### Task 16: Alert on draft creation failure (I4)
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (~line 660-667)
+
+**Step 1: Replace silent `skipped: True` with signal + SMS**
+
+On Gmail API failure: create jake_signals notification, send SMS, return `skipped: True`.
+
+**Step 2: Push and verify (combine with Task 15 if both touch same file)**
+
+Verify one normal conversation reply creates a draft successfully. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: alert Jake when conversation draft creation fails (I4)"
+```
+
+---
+
+### Task 17: Alert on unrecognized response_type
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (else branch ~line 466-467)
+
+**Step 1: Replace canned generic response with signal + SMS**
+
+Remove old `else` return. Create jake_signals notification (include thread_id and response_type value), send SMS, return `skipped: True`.
+
+**Step 2: Push and verify (combine with Tasks 15-16 if same file)**
+
+Verify one normal conversation reply works. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: alert Jake on unrecognized response_type (code bug safety net)"
+```
+
+---
+
+### Task 18: Alert on classification failure (ERROR path)
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (ERROR handling ~line 533-545)
+
+**Step 1: Replace vague CRM note with signal + SMS**
+
+Remove "Manual review needed" CRM note. Create jake_signals notification (include thread_id), send SMS, return `skipped: True`.
+
+**Step 2: Push and verify (combine with Tasks 15-17 if same file)**
+
+Verify one normal conversation reply classifies successfully. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: alert Jake on classification failure, remove vague CRM note"
+```
+
+**Note:** Tasks 15-18 all modify `generate_response_draft.inline_script.py`. Consider implementing all 4 together as one push + one commit to reduce push/verify cycles.
+
+---
+
+### Task 19: OFFER signal write SMS fallback
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py` (OFFER path ~line 548-567)
+
+**Step 1: Add SMS fallback when `write_notification_signal()` returns None**
+
+If signal write fails, send SMS to Jake as fallback. OFFER is highest-value terminal path — must never fail silently.
+
+**Step 2: Push and verify (combine with Tasks 15-18 if same file)**
+
+Seed one normal OFFER reply. Verify signal created, CRM note written, flow returns `skipped: True`. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: SMS fallback when OFFER notification signal write fails"
+```
+
+---
+
+### Task 20: Roll back timer lock when scheduling fails (C3)
+
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (`schedule_delayed_processing()`)
+
+**Step 1: Check HTTP status after scheduling call**
+
+If non-2xx: delete the timer lock row, raise error for Windmill retry.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed a test lead. Verify scheduling succeeds, timer lock inserted, delayed job fires. Failure path is code-review only.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/gmail_pubsub_webhook.py
+git commit -m "fix: roll back timer lock when scheduling call fails (C3)"
+```
+
+---
+
+### Task 21: Exact domain matching for system email filter
+
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (`parse_email_field()` ~line 450)
+
+**Step 1: Change substring to exact domain match**
+
+The domain after `@` must exactly equal the system domain.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed a LoopNet lead with contact email `testuser@myloopnet.com`. Verify email is extracted (NOT filtered). Seed a normal LoopNet lead — verify `leads@loopnet.com` IS filtered.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/gmail_pubsub_webhook.py
+git commit -m "fix: use exact domain matching for system email filter"
+```
+
+---
+
+### Task 22: Remove dead code in webhook
+
+**Files:**
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py`
+
+**Step 1: Delete `trigger_lead_intake()` (never called)**
+
+**Step 2: Delete Crexi branch in `parse_property_name()` (unreachable)**
+
+**Step 3: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed one Crexi lead and one LoopNet lead. Both should work identically to before.
+
+**Step 4: Commit**
+
+```bash
+git add windmill/f/switchboard/gmail_pubsub_webhook.py
+git commit -m "chore: remove dead trigger_lead_intake() and unreachable Crexi parse branch"
+```
+
+---
+
+### Task 23: Document draft_id_map contract
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/approval_gate_(draft).inline_script.py` (add comment)
+- Modify: `windmill/f/switchboard/gmail_pubsub_webhook.py` (add comment)
+- Modify: `windmill/f/switchboard/lead_conversation.flow/approval_gate_(reply_draft).inline_script.py` (add comment)
+
+**Step 1: Add cross-referencing WARNING comments in all 3 locations**
+
+See design doc for exact comment text.
+
+**Step 2: Push and verify**
+
+No behavior change. Visual review.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/approval_gate_\(draft\).inline_script.py \
+        windmill/f/switchboard/gmail_pubsub_webhook.py \
+        windmill/f/switchboard/lead_conversation.flow/approval_gate_\(reply_draft\).inline_script.py
+git commit -m "docs: add cross-reference comments for draft_id_map contract"
+```
+
+---
+
+### Task 24: Propagate has_nda into draft data
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py` (draft dict ~line 256-269)
+
+**Step 1: Add `"has_nda": lead.get("has_nda", False)` to draft dict**
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed a test lead. Query jake_signals — confirm `has_nda` field is present in signal detail JSON.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py
+git commit -m "fix: propagate has_nda into draft data for conversation engine"
+```
+
+---
+
+### Task 25: Hardcoded signature fallbacks
+
+**Files:**
+- Modify: `windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py`
+- Modify: `windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py`
+
+**Step 1: Add hardcoded fallbacks when `email_signatures` config is missing**
+
+Commercial: "Talk soon, Larry" + (734) 732-3789. Residential: "Talk soon, Andrea" + (734) 223-1015.
+
+**Step 2: Push and test directly**
+
+Temporarily rename `f/switchboard/email_signatures` variable. Seed one commercial and one residential lead. Verify correct fallback signatures. Rename variable back. Seed one more lead to confirm normal signatures resume.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/lead_intake.flow/generate_drafts_+_gmail.inline_script.py \
+        windmill/f/switchboard/lead_conversation.flow/generate_response_draft.inline_script.py
+git commit -m "fix: hardcoded signature fallbacks when email_signatures config is missing"
+```
+
+---
+
+### Task 26: Apps Script can see conversation draft deletions
+
+**Files:**
+- Modify: `windmill/f/switchboard/get_pending_draft_signals.py` (line 23 + line 8)
+
+**Step 1: Update SQL query**
+
+Change `WHERE source_flow = 'lead_intake'` to `WHERE source_flow IN ('lead_intake', 'lead_conversation')`. Update docstring.
+
+**Step 2: Push and verify**
+
+```bash
+wmill sync push --skip-variables --skip-secrets --skip-resources
+```
+
+Seed one lead_intake lead (creates pending signal) and one conversation reply (creates pending signal). Call `get_pending_draft_signals` via Windmill API. Verify BOTH signals appear.
+
+**Step 3: Commit**
+
+```bash
+git add windmill/f/switchboard/get_pending_draft_signals.py
+git commit -m "fix: include lead_conversation signals in get_pending_draft_signals"
+```
+
+---
+
+### Task 27: Update pipeline documentation
+
+**Files:**
+- Modify: `docs/LEAD_INTAKE_PIPELINE.md`
+- Modify: `docs/LEAD_CONVERSATION_ENGINE.md`
+
+**Step 1: Fix all inaccuracies listed in design doc**
+
+- Signer table: Andrea for residential, Larry for commercial + lead magnets (not Jake)
+- Add UpNest to all tables
+- Template count: 9 (not 8)
+- Add UpNest to lead source list
+- Fix `wants` field: list of strings, not a string
+- Add BizBuySell, Social Connect, UpNest to unlabeled detection sources
+
+**Step 2: Commit**
+
+```bash
+git add docs/LEAD_INTAKE_PIPELINE.md docs/LEAD_CONVERSATION_ENGINE.md
+git commit -m "docs: fix pipeline documentation to match code (signers, UpNest, wants field)"
+```
+
+---
+
+## Phase 3: Code Review Gate + Full E2E Suite
+
+---
+
+### Task 28: Post-implementation code review (13 failure paths)
+
+**Before running the E2E suite**, review each of the 13 failure paths listed in the design doc's "Post-Implementation Code Review: Failure Paths" table. These cannot be triggered in E2E testing — they require breaking live infrastructure. Verify the error handling is correct by reading the code.
+
+This is a gate. Do not proceed to Task 29 until all 13 failure paths are confirmed correct.
+
+---
+
+### Task 29: Pre-flight checks
+
+Run these before starting the E2E suite:
+
+1. **Verify `messages.import` triggers Pub/Sub:** Seed a throwaway email into leads@, confirm webhook fires within ~15 seconds.
+2. **Verify SMS gateway:** `curl -s http://100.125.176.16:8686/` — must be reachable.
+3. **Verify WiseAgent OAuth:** Make a test API call via Windmill.
+4. **Refresh Gmail tokens:** Get fresh access tokens for both leads@ and teamgotcher@.
+5. **Add temporary lead_magnet property:** Add `"TEST Lead Magnet Property"` with `lead_magnet: true` to `property_mapping` via Windmill API.
+
+---
+
+### Tasks 30-63: Full E2E Suite (34 tests)
+
+Execute all 34 test cases from the design doc's Test Matrix. One test at a time, sequential. Fix issues before moving to next test.
+
+**Group 1: Source + Template (Tasks 30-38, Tests 1-9)**
+**Group 2: Commercial Branching (Tasks 39-41, Tests 10-12)**
+**Group 3: Edge Cases (Tasks 42-48, Tests 13-16, 29-31)**
+**Group 4: Approval Loop (Tasks 49-51, Tests 17-19)**
+**Group 5: Conversation Classifications (Tasks 52-56, Tests 20-24)**
+**Group 6: Conversation Special Prompts (Tasks 57-61, Tests 25-26, 32-34)**
+**Group 7: Conversation Approval Loop (Tasks 62-63, Tests 27-28)**
+
+Each test follows the execution flow from the design doc:
+1. Seed test email (or reply)
+2. Pub/Sub fires → webhook runs
+3. Verify Windmill job completed
+4. Jake checks draft in Gmail
+5. Verify draft: correct template, signer, BCC, content
+6. Jake sends draft (or deletes for rejection tests)
+7. Verify post-approval: signal status, CRM, SMS, BCC
+8. Checkpoint: fix or move on
+
+See the current implementation plan (above Task 0 through Group 7) for exact seed emails, verification steps, and expected outputs per test.
+
+---
+
+### Task 64: Cleanup
+
+1. Delete all `TEST -` prefixed contacts from WiseAgent
+2. Clean up remaining test drafts in teamgotcher@
+3. Remove temporary lead_magnet property from `property_mapping`
+4. Test signals in jake_signals are already acted — no cleanup needed
+
+---
+
+**Total: 64 tasks (27 pre-test fixes + 1 code review gate + 1 pre-flight + 34 E2E tests + 1 cleanup)**
