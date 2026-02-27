@@ -726,6 +726,25 @@ def main(classify_result: dict):
         }
 
     except Exception as e:
+        print(f"[main] Draft creation failed for thread {thread_id}: {e}")
+        write_notification_signal(
+            f"Draft creation failed for thread {thread_id}",
+            {
+                "thread_id": thread_id,
+                "lead_email": lead_email,
+                "lead_name": lead_name,
+                "classification": cls,
+                "error": str(e)
+            }
+        )
+        try:
+            requests.post(
+                "http://100.125.176.16:8686/send-sms",
+                json={"phone": "+17348960518", "message": f"Draft creation failed for thread {thread_id}"},
+                timeout=10
+            )
+        except Exception as sms_err:
+            print(f"[main] SMS alert also failed: {sms_err}")
         return {
             "skipped": True,
             "reason": "draft_creation_failed",
