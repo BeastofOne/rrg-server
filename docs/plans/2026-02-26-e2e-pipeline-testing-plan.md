@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Execute 29 end-to-end tests (+ 3 setup tasks) covering every branch of lead_intake and lead_conversation, fixing issues as they're found.
+**Goal:** Execute 33 end-to-end tests (+ 3 setup tasks) covering every branch of lead_intake and lead_conversation, fixing issues as they're found.
 
 **Architecture:** Seed real notification emails into leads@ via Gmail API `messages.import`, let Pub/Sub naturally trigger the webhook, verify drafts in teamgotcher@, Jake manually approves/rejects, verify CRM + SMS. One test at a time, fix before moving on.
 
