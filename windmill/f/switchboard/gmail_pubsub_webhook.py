@@ -1100,6 +1100,28 @@ def main(message: dict = None):
                                 signal['signal_id'],
                                 signal['matched_draft_id']
                             )
+                            status_code = resume_result.get("status_code", 0)
+
+                            # If resume failed (5xx or timeout/no response), roll back
+                            # signal to pending so next webhook run retries
+                            if status_code >= 500 or status_code == 0:
+                                try:
+                                    conn = get_pg_conn()
+                                    cur = conn.cursor()
+                                    cur.execute("""
+                                        UPDATE public.jake_signals
+                                        SET status = 'pending', acted_by = NULL, acted_at = NULL
+                                        WHERE id = %s AND status = 'acted'
+                                    """, (signal['signal_id'],))
+                                    conn.commit()
+                                    cur.close()
+                                    conn.close()
+                                except Exception:
+                                    pass
+                                raise RuntimeError(
+                                    f"Resume failed with status {status_code} for signal {signal['signal_id']}"
+                                )
+
                             sent_processed.append({
                                 "thread_id": thread_id,
                                 "draft_id": signal['matched_draft_id'],
