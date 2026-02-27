@@ -31,6 +31,9 @@ def main(response_data: dict):
     resume_url = urls.get("resume", "")
     cancel_url = urls.get("cancel", "")
 
+    # WARNING: The webhook's find_and_update_signal_by_thread() queries this exact
+    # structure via JSONB SQL. If you change field names or nesting, update the
+    # webhook query too.
     # Build draft_id_map (same structure as lead_intake for SENT matching)
     draft_id_map = {}
     for i, draft in enumerate(drafts):

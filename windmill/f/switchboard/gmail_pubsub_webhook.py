@@ -833,6 +833,8 @@ def parse_lead_from_notification(service, msg_id, sender, subject, category):
 # Instead, we match sent emails to signals by thread_id, which is
 # preserved and stored in the signal's draft_id_map by Module E.
 
+# WARNING: This query depends on the exact structure of draft_id_map built by
+# Module E (approval_gate). If you change this query, update Module E too.
 def find_and_update_signal_by_thread(thread_id):
     """Find pending signal where draft_id_map contains a draft with matching thread_id.
 
