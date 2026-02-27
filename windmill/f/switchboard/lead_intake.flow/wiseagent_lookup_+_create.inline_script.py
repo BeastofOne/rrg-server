@@ -98,14 +98,18 @@ def check_followup(token, client_id):
                 note_date_str = note.get("NoteDate", "") or note.get("DateEntered", "") or note.get("Created", "") or note.get("Date", "")
                 if note_date_str:
                     try:
+                        # Try ISO format first (e.g. "2026-02-27T21:11:38Z")
                         note_date = datetime.fromisoformat(note_date_str.replace("Z", "+00:00"))
-                        if not note_date.tzinfo:
-                            note_date = note_date.replace(tzinfo=timezone.utc)
-                        if note_date >= cutoff:
-                            return True
-                    except Exception:
-                        # Can't parse date — skip this note (conservative)
-                        continue
+                    except (ValueError, TypeError):
+                        try:
+                            # WiseAgent returns "M/D/YYYY H:MM:SS AM/PM" (US format)
+                            note_date = datetime.strptime(note_date_str.strip(), "%m/%d/%Y %I:%M:%S %p")
+                        except (ValueError, TypeError):
+                            continue
+                    if not note_date.tzinfo:
+                        note_date = note_date.replace(tzinfo=timezone.utc)
+                    if note_date >= cutoff:
+                        return True
         return False
     except Exception:
         return False
