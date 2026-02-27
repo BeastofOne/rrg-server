@@ -220,12 +220,10 @@ def main(resume_payload: dict, draft_data: dict):
             if client_id:
                 # Block 1: Update status to "Contacted"
                 update_data = {"clientID": str(client_id), "Status": "Contacted"}
-                block1_ok = False
                 for attempt in range(3):
                     try:
                         wa_post(token, "updateContact", update_data)
                         result["actions"].append({"action": "updated_status", "client_id": client_id})
-                        block1_ok = True
                         break
                     except Exception as e:
                         print(f"[CRM Update] Status update attempt {attempt + 1}/3 failed for {email}: {e}")
@@ -253,12 +251,10 @@ def main(resume_payload: dict, draft_data: dict):
                     "note": note_text,
                     "subject": f"Outreach - {prop_names[:50]}"
                 }
-                block2_ok = False
                 for attempt in range(3):
                     try:
                         wa_post(token, "addContactNote", note_data)
                         result["actions"].append({"action": "note_added"})
-                        block2_ok = True
                         break
                     except Exception as e:
                         print(f"[CRM Update] Outreach note attempt {attempt + 1}/3 failed for {email}: {e}")
@@ -278,12 +274,10 @@ def main(resume_payload: dict, draft_data: dict):
                         "note": sms_note_text,
                         "subject": f"SMS Outreach - {prop_names[:50]}"
                     }
-                    block3_ok = False
                     for attempt in range(3):
                         try:
                             wa_post(token, "addContactNote", sms_note_data)
                             result["actions"].append({"action": "sms_note_added"})
-                            block3_ok = True
                             break
                         except Exception as e:
                             print(f"[CRM Update] SMS note attempt {attempt + 1}/3 failed for {email}: {e}")
@@ -302,7 +296,7 @@ def main(resume_payload: dict, draft_data: dict):
                     requests.post(
                         "http://100.125.176.16:8686/send-sms",
                         json={
-                            "to": "+17348960518",
+                            "phone": "+17348960518",
                             "message": f"CRM post-approval update failed for {email} (client {client_id}). Failed calls: {failed_calls}"
                         },
                         timeout=10

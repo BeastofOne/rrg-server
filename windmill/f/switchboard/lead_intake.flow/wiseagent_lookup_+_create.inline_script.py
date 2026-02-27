@@ -252,7 +252,7 @@ def main(leads: list):
                 try:
                     requests.post(
                         "http://100.125.176.16:8686/send-sms",
-                        json={"to": "+17348960518", "message": f"CRM contact creation failed for {email} after 3 attempts"},
+                        json={"phone": "+17348960518", "message": f"CRM contact creation failed for {email} after 3 attempts"},
                         timeout=10
                     )
                 except Exception:
