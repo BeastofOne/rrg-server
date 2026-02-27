@@ -215,55 +215,133 @@ def main(resume_payload: dict, draft_data: dict):
             prop_names = ", ".join(p.get("canonical_name", "") for p in props if p.get("canonical_name"))
 
             result = {"email": email, "actions": []}
+            failures = []
 
-            try:
-                # Module A already created contacts — just update status to "Contacted"
-                if client_id:
-                    update_data = {"clientID": str(client_id), "Status": "Contacted"}
-                    wa_post(token, "updateContact", update_data)
-                    result["actions"].append({"action": "updated_status", "client_id": client_id})
+            if client_id:
+                # Block 1: Update status to "Contacted"
+                update_data = {"clientID": str(client_id), "Status": "Contacted"}
+                block1_ok = False
+                for attempt in range(3):
+                    try:
+                        wa_post(token, "updateContact", update_data)
+                        result["actions"].append({"action": "updated_status", "client_id": client_id})
+                        block1_ok = True
+                        break
+                    except Exception as e:
+                        print(f"[CRM Update] Status update attempt {attempt + 1}/3 failed for {email}: {e}")
+                        if attempt < 2:
+                            time.sleep(2)
+                        if attempt == 2:
+                            failures.append({"call": "updateContact (status)", "error": str(e)})
 
-                    # Build accurate CRM note based on actual SMS outcome
-                    note_text = f"Email sent via Gmail draft on {today}. Property: {prop_names}."
-                    sms = sms_results[i] if i < len(sms_results) else {}
-                    if sms.get("sms_sent"):
-                        note_text += f" SMS sent to {sms.get('phone', '')}."
-                    elif sms.get("reason") == "no_phone_or_body":
-                        note_text += " No phone number — SMS not sent."
-                    else:
-                        note_text += " SMS attempted but failed."
+                # Block 2: Outreach note
+                note_text = f"Email sent via Gmail draft on {today}. Property: {prop_names}."
+                sms = sms_results[i] if i < len(sms_results) else {}
+                if sms.get("sms_sent"):
+                    note_text += f" SMS sent to {sms.get('phone', '')}."
+                elif sms.get("reason") == "no_phone_or_body":
+                    note_text += " No phone number — SMS not sent."
+                else:
+                    note_text += " SMS attempted but failed."
 
-                    # Append email body to outreach note
-                    email_body = draft.get("email_body", "")
-                    if email_body:
-                        note_text += f"\n\n--- Email Body ---\n{email_body}"
+                email_body = draft.get("email_body", "")
+                if email_body:
+                    note_text += f"\n\n--- Email Body ---\n{email_body}"
 
-                    note_data = {
+                note_data = {
+                    "clientids": str(client_id),
+                    "note": note_text,
+                    "subject": f"Outreach - {prop_names[:50]}"
+                }
+                block2_ok = False
+                for attempt in range(3):
+                    try:
+                        wa_post(token, "addContactNote", note_data)
+                        result["actions"].append({"action": "note_added"})
+                        block2_ok = True
+                        break
+                    except Exception as e:
+                        print(f"[CRM Update] Outreach note attempt {attempt + 1}/3 failed for {email}: {e}")
+                        if attempt < 2:
+                            time.sleep(2)
+                        if attempt == 2:
+                            failures.append({"call": "addContactNote (outreach)", "error": str(e), "text": note_text[:200]})
+
+                # Block 3: SMS note (only if SMS was sent)
+                if sms.get("sms_sent"):
+                    sms_body = draft.get("sms_body", "")
+                    sms_note_text = f"SMS sent to {sms.get('phone', '')} on {today}. Property: {prop_names}."
+                    if sms_body:
+                        sms_note_text += f"\n\n--- SMS Body ---\n{sms_body}"
+                    sms_note_data = {
                         "clientids": str(client_id),
-                        "note": note_text,
-                        "subject": f"Outreach - {prop_names[:50]}"
+                        "note": sms_note_text,
+                        "subject": f"SMS Outreach - {prop_names[:50]}"
                     }
-                    wa_post(token, "addContactNote", note_data)
-                    result["actions"].append({"action": "note_added"})
+                    block3_ok = False
+                    for attempt in range(3):
+                        try:
+                            wa_post(token, "addContactNote", sms_note_data)
+                            result["actions"].append({"action": "sms_note_added"})
+                            block3_ok = True
+                            break
+                        except Exception as e:
+                            print(f"[CRM Update] SMS note attempt {attempt + 1}/3 failed for {email}: {e}")
+                            if attempt < 2:
+                                time.sleep(2)
+                            if attempt == 2:
+                                failures.append({"call": "addContactNote (sms)", "error": str(e), "text": sms_note_text[:200]})
 
-                    # Separate SMS note with body
-                    if sms.get("sms_sent"):
-                        sms_body = draft.get("sms_body", "")
-                        sms_note_text = f"SMS sent to {sms.get('phone', '')} on {today}. Property: {prop_names}."
-                        if sms_body:
-                            sms_note_text += f"\n\n--- SMS Body ---\n{sms_body}"
-                        sms_note_data = {
-                            "clientids": str(client_id),
-                            "note": sms_note_text,
-                            "subject": f"SMS Outreach - {prop_names[:50]}"
-                        }
-                        wa_post(token, "addContactNote", sms_note_data)
-                        result["actions"].append({"action": "sms_note_added"})
-
-                result["success"] = True
-            except Exception as e:
+            # Consolidate failures: SMS alert + DB log
+            if failures:
                 result["success"] = False
-                result["error"] = str(e)
+                result["failures"] = failures
+                failed_calls = ", ".join(f["call"] for f in failures)
+                # SMS alert to Jake
+                try:
+                    requests.post(
+                        "http://100.125.176.16:8686/send-sms",
+                        json={
+                            "to": "+17348960518",
+                            "message": f"CRM post-approval update failed for {email} (client {client_id}). Failed calls: {failed_calls}"
+                        },
+                        timeout=10
+                    )
+                except Exception:
+                    pass  # SMS failure must not crash the pipeline
+                # Log to DB
+                try:
+                    pg = wmill.get_resource("f/switchboard/pg")
+                    conn = psycopg2.connect(
+                        host=pg["host"], port=pg.get("port", 5432),
+                        user=pg["user"], password=pg["password"],
+                        dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
+                    )
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("""
+                            INSERT INTO public.contact_creation_log
+                            (email, name, phone, source, source_type, wiseagent_client_id, property_name, raw_lead_data, status)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                        """, (
+                            email,
+                            draft.get("name", ""),
+                            draft.get("phone", ""),
+                            draft.get("source", ""),
+                            draft.get("source_type", ""),
+                            str(client_id) if client_id else None,
+                            prop_names,
+                            json.dumps({"failures": failures}),
+                            "crm_update_failed"
+                        ))
+                        conn.commit()
+                        cur.close()
+                    finally:
+                        conn.close()
+                except Exception:
+                    pass  # DB logging failure must not crash the pipeline
+            else:
+                result["success"] = True
 
             wiseagent_results.append(result)
 
