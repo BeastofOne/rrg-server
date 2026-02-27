@@ -149,24 +149,26 @@ def log_contact_creation(lead, client_id):
             user=pg["user"], password=pg["password"],
             dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
         )
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO public.contact_creation_log
-            (email, name, phone, source, source_type, wiseagent_client_id, property_name, raw_lead_data)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-        """, (
-            lead.get("email", ""),
-            lead.get("name", ""),
-            lead.get("phone", ""),
-            lead.get("source", ""),
-            lead.get("source_type", ""),
-            str(client_id) if client_id else None,
-            lead.get("property_name", ""),
-            json.dumps(lead)
-        ))
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO public.contact_creation_log
+                (email, name, phone, source, source_type, wiseagent_client_id, property_name, raw_lead_data)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """, (
+                lead.get("email", ""),
+                lead.get("name", ""),
+                lead.get("phone", ""),
+                lead.get("source", ""),
+                lead.get("source_type", ""),
+                str(client_id) if client_id else None,
+                lead.get("property_name", ""),
+                json.dumps(lead)
+            ))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
     except Exception:
         pass  # Non-critical — don't fail the pipeline over logging
 

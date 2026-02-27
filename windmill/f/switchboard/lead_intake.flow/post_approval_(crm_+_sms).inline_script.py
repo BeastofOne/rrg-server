@@ -89,15 +89,17 @@ def mark_signal_acted(signal_id, acted_by):
             user=pg["user"], password=pg["password"],
             dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
         )
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE public.jake_signals
-            SET status = 'acted', acted_by = %s, acted_at = NOW()
-            WHERE id = %s AND status = 'pending'
-        """, (acted_by, signal_id))
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE public.jake_signals
+                SET status = 'acted', acted_by = %s, acted_at = NOW()
+                WHERE id = %s AND status = 'pending'
+            """, (acted_by, signal_id))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
     except Exception:
         pass  # Non-critical — signal may already be acted
 

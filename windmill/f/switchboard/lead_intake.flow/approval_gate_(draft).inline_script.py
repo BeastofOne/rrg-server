@@ -52,28 +52,30 @@ def main(draft_data: dict):
         dbname=pg["dbname"],
         sslmode=pg.get("sslmode", "disable")
     )
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
 
-    cur.execute("""
-        INSERT INTO public.jake_signals
-        (signal_type, source_flow, summary, detail, actions, windmill_job_id, resume_url, cancel_url, status)
-        VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, 'pending')
-        RETURNING id, created_at
-    """, (
-        "approval_needed",
-        "lead_intake",
-        summary_text,
-        json.dumps(detail),
-        json.dumps(actions),
-        "",
-        resume_url,
-        cancel_url
-    ))
+        cur.execute("""
+            INSERT INTO public.jake_signals
+            (signal_type, source_flow, summary, detail, actions, windmill_job_id, resume_url, cancel_url, status)
+            VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, 'pending')
+            RETURNING id, created_at
+        """, (
+            "approval_needed",
+            "lead_intake",
+            summary_text,
+            json.dumps(detail),
+            json.dumps(actions),
+            "",
+            resume_url,
+            cancel_url
+        ))
 
-    row = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
     return {
         "signal_id": row[0],

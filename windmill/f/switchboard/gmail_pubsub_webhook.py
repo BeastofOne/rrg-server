@@ -199,26 +199,28 @@ def claim_message_ids(msg_ids, account, category=None):
         return set()
 
     conn = get_pg_conn()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
 
-    # Clean up entries older than 7 days (lightweight, runs every call)
-    cur.execute("DELETE FROM public.processed_notifications WHERE processed_at < NOW() - INTERVAL '7 days'")
+        # Clean up entries older than 7 days (lightweight, runs every call)
+        cur.execute("DELETE FROM public.processed_notifications WHERE processed_at < NOW() - INTERVAL '7 days'")
 
-    claimed = set()
-    for mid in msg_ids:
-        cur.execute("""
-            INSERT INTO public.processed_notifications (message_id, account, category)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (message_id) DO NOTHING
-            RETURNING message_id
-        """, (mid, account, category))
-        row = cur.fetchone()
-        if row:
-            claimed.add(row[0])
+        claimed = set()
+        for mid in msg_ids:
+            cur.execute("""
+                INSERT INTO public.processed_notifications (message_id, account, category)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+                RETURNING message_id
+            """, (mid, account, category))
+            row = cur.fetchone()
+            if row:
+                claimed.add(row[0])
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
     return claimed
 
 
@@ -231,27 +233,29 @@ def stage_leads(leads):
         return []
 
     conn = get_pg_conn()
-    cur = conn.cursor()
-    staged_ids = []
-    for lead in leads:
-        cur.execute("""
-            INSERT INTO public.staged_leads (email, name, phone, source, source_type, property_name, notification_message_id, raw_lead)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-            RETURNING id
-        """, (
-            lead.get("email", "").strip().lower(),
-            lead.get("name", ""),
-            lead.get("phone", ""),
-            lead.get("source", ""),
-            lead.get("source_type", ""),
-            lead.get("property_name", ""),
-            lead.get("notification_message_id", ""),
-            json.dumps(lead)
-        ))
-        staged_ids.append(cur.fetchone()[0])
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        staged_ids = []
+        for lead in leads:
+            cur.execute("""
+                INSERT INTO public.staged_leads (email, name, phone, source, source_type, property_name, notification_message_id, raw_lead)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                RETURNING id
+            """, (
+                lead.get("email", "").strip().lower(),
+                lead.get("name", ""),
+                lead.get("phone", ""),
+                lead.get("source", ""),
+                lead.get("source_type", ""),
+                lead.get("property_name", ""),
+                lead.get("notification_message_id", ""),
+                json.dumps(lead)
+            ))
+            staged_ids.append(cur.fetchone()[0])
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
     return staged_ids
 
 
@@ -264,19 +268,21 @@ def schedule_delayed_processing(email):
     """
     email_lower = email.strip().lower()
     conn = get_pg_conn()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
 
-    # Atomic check: only schedule if no timer is already running for this email
-    cur.execute("""
-        INSERT INTO public.processed_notifications (message_id, account, category)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (message_id) DO NOTHING
-        RETURNING message_id
-    """, (f"timer:{email_lower}", "leads", "batch_timer"))
-    row = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
+        # Atomic check: only schedule if no timer is already running for this email
+        cur.execute("""
+            INSERT INTO public.processed_notifications (message_id, account, category)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (message_id) DO NOTHING
+            RETURNING message_id
+        """, (f"timer:{email_lower}", "leads", "batch_timer"))
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
     if not row:
         # Timer already running for this email — just stage, don't schedule
@@ -300,14 +306,16 @@ def schedule_delayed_processing(email):
     if response.status_code < 200 or response.status_code >= 300:
         # Roll back the timer lock so the next webhook invocation can retry
         rollback_conn = get_pg_conn()
-        rollback_cur = rollback_conn.cursor()
-        rollback_cur.execute(
-            "DELETE FROM public.processed_notifications WHERE message_id = %s",
-            (f"timer:{email_lower}",)
-        )
-        rollback_conn.commit()
-        rollback_cur.close()
-        rollback_conn.close()
+        try:
+            rollback_cur = rollback_conn.cursor()
+            rollback_cur.execute(
+                "DELETE FROM public.processed_notifications WHERE message_id = %s",
+                (f"timer:{email_lower}",)
+            )
+            rollback_conn.commit()
+            rollback_cur.close()
+        finally:
+            rollback_conn.close()
         raise RuntimeError(
             f"Scheduling failed for {email_lower}: HTTP {response.status_code} — {response.text[:200]}"
         )
@@ -831,27 +839,29 @@ def find_and_update_signal_by_thread(thread_id):
     Returns signal info + matched draft_id, or None if no match.
     """
     conn = get_pg_conn()
-    cur = conn.cursor()
-    # Search through draft_id_map values for matching thread_id
-    cur.execute("""
-        UPDATE public.jake_signals
-        SET status = 'acted', acted_by = 'gmail_pubsub', acted_at = NOW()
-        WHERE status = 'pending'
-          AND source_flow IN ('lead_intake', 'lead_conversation')
-          AND id = (
-            SELECT s.id FROM public.jake_signals s,
-            jsonb_each(s.detail->'draft_id_map') AS kv
-            WHERE s.status = 'pending'
-              AND s.source_flow IN ('lead_intake', 'lead_conversation')
-              AND kv.value->>'thread_id' = %s
-            LIMIT 1
-          )
-        RETURNING id, resume_url, detail
-    """, (thread_id,))
-    row = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        # Search through draft_id_map values for matching thread_id
+        cur.execute("""
+            UPDATE public.jake_signals
+            SET status = 'acted', acted_by = 'gmail_pubsub', acted_at = NOW()
+            WHERE status = 'pending'
+              AND source_flow IN ('lead_intake', 'lead_conversation')
+              AND id = (
+                SELECT s.id FROM public.jake_signals s,
+                jsonb_each(s.detail->'draft_id_map') AS kv
+                WHERE s.status = 'pending'
+                  AND s.source_flow IN ('lead_intake', 'lead_conversation')
+                  AND kv.value->>'thread_id' = %s
+                LIMIT 1
+              )
+            RETURNING id, resume_url, detail
+        """, (thread_id,))
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
     if row:
         # Find the matched draft_id from the map
         detail = row[2]
@@ -881,20 +891,22 @@ def find_outreach_by_thread(thread_id):
     Returns outreach context if match found, None otherwise.
     """
     conn = get_pg_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT s.id, s.detail
-        FROM public.jake_signals s,
-             jsonb_each(s.detail->'draft_id_map') AS kv
-        WHERE s.status = 'acted'
-          AND s.source_flow IN ('lead_intake', 'lead_conversation')
-          AND kv.value->>'thread_id' = %s
-        ORDER BY s.acted_at DESC
-        LIMIT 1
-    """, (thread_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT s.id, s.detail
+            FROM public.jake_signals s,
+                 jsonb_each(s.detail->'draft_id_map') AS kv
+            WHERE s.status = 'acted'
+              AND s.source_flow IN ('lead_intake', 'lead_conversation')
+              AND kv.value->>'thread_id' = %s
+            ORDER BY s.acted_at DESC
+            LIMIT 1
+        """, (thread_id,))
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
 
     if not row:
         return None
@@ -1103,15 +1115,17 @@ def main(message: dict = None):
                             if status_code >= 500 or status_code == 0:
                                 try:
                                     conn = get_pg_conn()
-                                    cur = conn.cursor()
-                                    cur.execute("""
-                                        UPDATE public.jake_signals
-                                        SET status = 'pending', acted_by = NULL, acted_at = NULL
-                                        WHERE id = %s AND status = 'acted'
-                                    """, (signal['signal_id'],))
-                                    conn.commit()
-                                    cur.close()
-                                    conn.close()
+                                    try:
+                                        cur = conn.cursor()
+                                        cur.execute("""
+                                            UPDATE public.jake_signals
+                                            SET status = 'pending', acted_by = NULL, acted_at = NULL
+                                            WHERE id = %s AND status = 'acted'
+                                        """, (signal['signal_id'],))
+                                        conn.commit()
+                                        cur.close()
+                                    finally:
+                                        conn.close()
                                 except Exception as e:
                                     print(f"[C4] Signal rollback failed: {e}")
                                 raise RuntimeError(

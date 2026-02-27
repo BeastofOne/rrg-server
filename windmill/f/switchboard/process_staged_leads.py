@@ -41,38 +41,40 @@ def main(email: str):
 
     # 1. Fetch all unprocessed leads for this email
     conn = get_pg_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, raw_lead
-        FROM public.staged_leads
-        WHERE lower(email) = %s AND NOT processed
-        ORDER BY staged_at ASC
-    """, (email_lower,))
-    rows = cur.fetchall()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, raw_lead
+            FROM public.staged_leads
+            WHERE lower(email) = %s AND NOT processed
+            ORDER BY staged_at ASC
+        """, (email_lower,))
+        rows = cur.fetchall()
 
-    if not rows:
-        # Clean up timer even if no leads (edge case: leads were already processed by another job)
-        cur.execute(
-            "DELETE FROM public.processed_notifications WHERE message_id = %s",
-            (f"timer:{email_lower}",)
-        )
+        if not rows:
+            # Clean up timer even if no leads (edge case: leads were already processed by another job)
+            cur.execute(
+                "DELETE FROM public.processed_notifications WHERE message_id = %s",
+                (f"timer:{email_lower}",)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            return {"email": email_lower, "skipped": True, "reason": "no_unprocessed_leads"}
+
+        # 2. Mark them as processed (claim them so a concurrent job doesn't double-process)
+        row_ids = [r[0] for r in rows]
+        cur.execute("""
+            UPDATE public.staged_leads
+            SET processed = TRUE, processed_at = NOW()
+            WHERE id = ANY(%s) AND NOT processed
+            RETURNING id
+        """, (row_ids,))
+        claimed_ids = {r[0] for r in cur.fetchall()}
         conn.commit()
         cur.close()
+    finally:
         conn.close()
-        return {"email": email_lower, "skipped": True, "reason": "no_unprocessed_leads"}
-
-    # 2. Mark them as processed (claim them so a concurrent job doesn't double-process)
-    row_ids = [r[0] for r in rows]
-    cur.execute("""
-        UPDATE public.staged_leads
-        SET processed = TRUE, processed_at = NOW()
-        WHERE id = ANY(%s) AND NOT processed
-        RETURNING id
-    """, (row_ids,))
-    claimed_ids = {r[0] for r in cur.fetchall()}
-    conn.commit()
-    cur.close()
-    conn.close()
 
     # Only process rows we actually claimed
     leads = []
@@ -104,15 +106,17 @@ def main(email: str):
     if trigger_failed:
         # Unclaim leads so they can be retried
         conn = get_pg_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE public.staged_leads
-            SET processed = FALSE, processed_at = NULL
-            WHERE id = ANY(%s)
-        """, (list(claimed_ids),))
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE public.staged_leads
+                SET processed = FALSE, processed_at = NULL
+                WHERE id = ANY(%s)
+            """, (list(claimed_ids),))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
 
         # Alert Jake via SMS gateway
         try:
@@ -129,14 +133,16 @@ def main(email: str):
     # 4. Clean up batch timer so future leads for this email can schedule new timers
     # Only delete on success — keep timer intact during retries
     conn = get_pg_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "DELETE FROM public.processed_notifications WHERE message_id = %s",
-        (f"timer:{email_lower}",)
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM public.processed_notifications WHERE message_id = %s",
+            (f"timer:{email_lower}",)
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
     return {
         "email": email_lower,

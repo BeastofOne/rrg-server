@@ -20,20 +20,22 @@ def main(signal_id: int, action: str, acted_by: str = "jake"):
         dbname=pg["dbname"],
         sslmode=pg.get("sslmode", "disable"),
     )
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE public.jake_signals
-        SET status = 'acted', acted_at = NOW(), acted_by = %s
-        WHERE id = %s AND status = 'pending'
-        RETURNING id, signal_type, source_flow, summary, status, acted_at
-        """,
-        (acted_by, signal_id),
-    )
-    row = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE public.jake_signals
+            SET status = 'acted', acted_at = NOW(), acted_by = %s
+            WHERE id = %s AND status = 'pending'
+            RETURNING id, signal_type, source_flow, summary, status, acted_at
+            """,
+            (acted_by, signal_id),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
     if row is None:
         return {"error": f"Signal {signal_id} not found or already acted upon"}
     cols = ["id", "signal_type", "source_flow", "summary", "status", "acted_at"]

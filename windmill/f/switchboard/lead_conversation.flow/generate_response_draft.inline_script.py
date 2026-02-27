@@ -119,17 +119,19 @@ def write_notification_signal(summary, detail):
             user=pg["user"], password=pg["password"],
             dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
         )
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO public.jake_signals
-            (signal_type, source_flow, summary, detail, actions, status)
-            VALUES ('status_update', 'lead_conversation', %s, %s::jsonb, '[]'::jsonb, 'pending')
-            RETURNING id
-        """, (summary, json.dumps(detail)))
-        signal_id = cur.fetchone()[0]
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO public.jake_signals
+                (signal_type, source_flow, summary, detail, actions, status)
+                VALUES ('status_update', 'lead_conversation', %s, %s::jsonb, '[]'::jsonb, 'pending')
+                RETURNING id
+            """, (summary, json.dumps(detail)))
+            signal_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
         return signal_id
     except Exception:
         return None
