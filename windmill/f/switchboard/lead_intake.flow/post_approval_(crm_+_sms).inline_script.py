@@ -12,6 +12,18 @@ BASE_URL = "https://sync.thewiseagent.com/http/webconnect.asp"
 TOKEN_URL = "https://sync.thewiseagent.com/WiseAuth/token"
 
 
+def wa_post(token, request_type, data):
+    """Make a WiseAgent API call."""
+    resp = requests.post(
+        BASE_URL + f"?requestType={request_type}",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15
+    )
+    resp.raise_for_status()
+    return resp
+
+
 def get_token(oauth):
     expires_at = oauth.get("expires_at", "")
     if expires_at:
@@ -105,13 +117,7 @@ def main(resume_payload: dict, draft_data: dict):
                         "note": f"Lead rejected — draft deleted on {deleted_at}. Property: {prop_names}.",
                         "subject": f"Lead Rejected - {prop_names[:50]}"
                     }
-                    resp = requests.post(
-                        BASE_URL + "?requestType=addContactNote",
-                        data=note_data,
-                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                        timeout=15
-                    )
-                    resp.raise_for_status()
+                    wa_post(token, "addContactNote", note_data)
                     wiseagent_results.append({"email": draft.get("email"), "action": "rejection_note_added", "success": True})
                 except Exception as e:
                     wiseagent_results.append({"email": draft.get("email"), "action": "rejection_note_failed", "error": str(e)})
@@ -182,13 +188,7 @@ def main(resume_payload: dict, draft_data: dict):
                 # Module A already created contacts — just update status to "Contacted"
                 if client_id:
                     update_data = {"clientID": str(client_id), "Status": "Contacted"}
-                    resp = requests.post(
-                        BASE_URL + "?requestType=updateContact",
-                        data=update_data,
-                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                        timeout=15
-                    )
-                    resp.raise_for_status()
+                    wa_post(token, "updateContact", update_data)
                     result["actions"].append({"action": "updated_status", "client_id": client_id})
 
                     # Build accurate CRM note based on actual SMS outcome
@@ -211,13 +211,7 @@ def main(resume_payload: dict, draft_data: dict):
                         "note": note_text,
                         "subject": f"Outreach - {prop_names[:50]}"
                     }
-                    resp = requests.post(
-                        BASE_URL + "?requestType=addContactNote",
-                        data=note_data,
-                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                        timeout=15
-                    )
-                    resp.raise_for_status()
+                    wa_post(token, "addContactNote", note_data)
                     result["actions"].append({"action": "note_added"})
 
                     # Separate SMS note with body
@@ -231,13 +225,7 @@ def main(resume_payload: dict, draft_data: dict):
                             "note": sms_note_text,
                             "subject": f"SMS Outreach - {prop_names[:50]}"
                         }
-                        resp = requests.post(
-                            BASE_URL + "?requestType=addContactNote",
-                            data=sms_note_data,
-                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                            timeout=15
-                        )
-                        resp.raise_for_status()
+                        wa_post(token, "addContactNote", sms_note_data)
                         result["actions"].append({"action": "sms_note_added"})
 
                 result["success"] = True

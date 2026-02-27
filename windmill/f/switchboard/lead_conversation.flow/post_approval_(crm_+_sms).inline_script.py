@@ -18,6 +18,18 @@ BASE_URL = "https://sync.thewiseagent.com/http/webconnect.asp"
 TOKEN_URL = "https://sync.thewiseagent.com/WiseAuth/token"
 
 
+def wa_post(token, request_type, data):
+    """Make a WiseAgent API call."""
+    resp = requests.post(
+        BASE_URL + f"?requestType={request_type}",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15
+    )
+    resp.raise_for_status()
+    return resp
+
+
 def get_wa_token(oauth):
     expires_at = oauth.get("expires_at", "")
     if expires_at:
@@ -105,16 +117,11 @@ def main(resume_payload: dict, response_data: dict):
 
             if client_id:
                 try:
-                    requests.post(
-                        BASE_URL + "?requestType=addContactNote",
-                        data={
-                            "clientids": str(client_id),
-                            "note": f"Reply draft deleted (rejected) on {deleted_at}. Response type: {response_type}. Property: {prop_names}.",
-                            "subject": f"Reply Rejected - {prop_names[:50]}"
-                        },
-                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                        timeout=15
-                    )
+                    wa_post(token, "addContactNote", {
+                        "clientids": str(client_id),
+                        "note": f"Reply draft deleted (rejected) on {deleted_at}. Response type: {response_type}. Property: {prop_names}.",
+                        "subject": f"Reply Rejected - {prop_names[:50]}"
+                    })
                 except Exception:
                     pass
 
@@ -188,16 +195,11 @@ def main(resume_payload: dict, response_data: dict):
                 note_text += " SMS attempted but failed."
 
             try:
-                requests.post(
-                    BASE_URL + "?requestType=addContactNote",
-                    data={
-                        "clientids": str(client_id),
-                        "note": note_text,
-                        "subject": f"Reply Sent - {prop_names[:50]}"
-                    },
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
-                    timeout=15
-                )
+                wa_post(token, "addContactNote", {
+                    "clientids": str(client_id),
+                    "note": note_text,
+                    "subject": f"Reply Sent - {prop_names[:50]}"
+                })
             except Exception:
                 pass
 
