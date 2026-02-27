@@ -508,17 +508,7 @@ def parse_phone_field(body):
 
 def parse_property_name(subject, body, category):
     """Extract property name from notification subject/body."""
-    if category == "crexi":
-        # Crexi subjects: "Someone opened your OM for Property Name"
-        m = re.search(r'(?:\bfor\b|\bon\b)\s+(.+?)(?:\s*$)', subject, re.IGNORECASE)
-        if m:
-            prop = m.group(1).strip().rstrip('.')
-            if len(prop) > 2:
-                return prop
-        m = re.search(r'(?:property|listing)\s*[:\-]\s*(.+?)(?:\n|$)', body, re.IGNORECASE)
-        if m:
-            return m.group(1).strip()
-    elif category == "loopnet":
+    if category == "loopnet":
         m = re.search(r'favorited\s+(.+?)(?:\s+on|\s*$)', subject, re.IGNORECASE)
         if m:
             return m.group(1).strip()
@@ -977,22 +967,6 @@ def trigger_resume(resume_url, signal_id, draft_id):
         resume_url,
         json=payload,
         headers={"Authorization": f"Bearer {token}"},
-        timeout=30
-    )
-    return {"status_code": response.status_code, "response": response.text[:500] if response.text else ""}
-
-
-# ============================================================
-# Lead intake trigger
-# ============================================================
-
-def trigger_lead_intake(leads_batch):
-    """Trigger the lead_intake flow with parsed leads."""
-    token = wmill.get_variable("f/switchboard/router_token")
-    response = requests.post(
-        f"{WM_API_BASE}/api/w/rrg/jobs/run/f/f/switchboard/lead_intake",
-        json={"leads": leads_batch},
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         timeout=30
     )
     return {"status_code": response.status_code, "response": response.text[:500] if response.text else ""}
