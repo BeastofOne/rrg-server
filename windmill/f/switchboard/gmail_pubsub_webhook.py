@@ -443,7 +443,7 @@ def parse_email_field(body):
         if 'noreply' in lower or 'no-reply' in lower:
             continue
         domain = email.split('@')[1].lower()
-        if not any(sd in domain for sd in SYSTEM_DOMAINS):
+        if domain not in SYSTEM_DOMAINS:
             return email
     return ""
 
