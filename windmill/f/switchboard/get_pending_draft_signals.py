@@ -5,7 +5,7 @@ import wmill
 import psycopg2
 
 def main():
-    """Get all pending lead_intake signals that have draft_id_map."""
+    """Get all pending signals that have draft_id_map."""
     pg = wmill.get_resource("f/switchboard/pg")
     conn = psycopg2.connect(
         host=pg["host"],
@@ -21,7 +21,7 @@ def main():
             SELECT id, resume_url, cancel_url, detail
             FROM public.jake_signals
             WHERE status = 'pending'
-              AND source_flow = 'lead_intake'
+              AND source_flow IN ('lead_intake', 'lead_conversation')
               AND detail ? 'draft_id_map'
             ORDER BY created_at DESC
         """)
