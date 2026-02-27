@@ -41,5 +41,6 @@ def main(leads: list):
             result["brochure_highlights"] = ""
             result["lead_magnet"] = False
             result["response_override"] = ""
+            result["property_address"] = lead.get("property_address", "")
         enriched.append(result)
     return enriched

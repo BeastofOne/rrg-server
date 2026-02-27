@@ -678,7 +678,7 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
     if not email and not name:
         return None
 
-    return {
+    result = {
         "name": name,
         "email": email,
         "phone": phone,
@@ -687,6 +687,10 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
         "property_name": property_name,
         "notification_message_id": msg_id
     }
+    # Social Connect "Property" field contains a street address
+    if property_name:
+        result["property_address"] = property_name
+    return result
 
 
 def parse_upnest_lead(service, msg_id, sender, subject):
@@ -796,11 +800,25 @@ def parse_lead_from_notification(service, msg_id, sender, subject, category):
     phone = parse_phone_field(body)
     property_name = parse_property_name(subject, body, category)
 
+    # Extract property_address for residential sources where property_name
+    # is actually a street address (Seller Hub body, Realtor.com subject)
+    property_address = ""
+    if category == "seller_hub":
+        # Seller Hub: "Property Address: 123 Main St, City, MI 48103"
+        m = re.search(r'(?:property\s*address|address)\s*[:\-]\s*(.+?)(?:\n|$)', body, re.IGNORECASE)
+        if m:
+            property_address = m.group(1).strip()
+    elif category == "realtor_com":
+        # Realtor.com: property_name from subject is already an address
+        # e.g. "New realtor.com lead: 123 Main St, City, MI 48103"
+        if property_name:
+            property_address = property_name
+
     # Need at least an email or name to create a lead
     if not email and not name:
         return None
 
-    return {
+    result = {
         "name": name,
         "email": email,
         "phone": phone,
@@ -809,6 +827,9 @@ def parse_lead_from_notification(service, msg_id, sender, subject, category):
         "property_name": property_name,
         "notification_message_id": msg_id
     }
+    if property_address:
+        result["property_address"] = property_address
+    return result
 
 
 # ============================================================
