@@ -510,7 +510,8 @@ RULES:
 - Write ONLY the email body text"""
 
     else:
-        return f"Hey {first_name},\n\nThanks for getting back to me. If you have any questions, don't hesitate to reach out. My direct line is {phone}."
+        print(f"[generate_response] Unrecognized response_type: {response_type}")
+        return None
 
     try:
         result = subprocess.run(
@@ -671,6 +672,30 @@ def main(classify_result: dict):
         except Exception as sms_err:
             print(f"[main] SMS alert also failed: {sms_err}")
         return {"skipped": True, "reason": "ai_generation_failed"}
+
+    # Check for unrecognized response_type (generate_response_with_claude returns None)
+    if response_body is None:
+        print(f"[main] Unrecognized response_type '{response_type}' for thread {thread_id}")
+        write_notification_signal(
+            f"Unrecognized response_type '{response_type}' for thread {thread_id}",
+            {
+                "thread_id": thread_id,
+                "response_type": response_type,
+                "lead_email": lead_email,
+                "lead_name": lead_name,
+                "classification": cls,
+                "sub_classification": sub
+            }
+        )
+        try:
+            requests.post(
+                "http://100.125.176.16:8686/send-sms",
+                json={"phone": "+17348960518", "message": f"Unrecognized response_type '{response_type}' for thread {thread_id}"},
+                timeout=10
+            )
+        except Exception as sms_err:
+            print(f"[main] SMS alert also failed: {sms_err}")
+        return {"skipped": True, "reason": "unrecognized_response_type"}
 
     # Create Gmail draft as reply in the same thread
     try:
