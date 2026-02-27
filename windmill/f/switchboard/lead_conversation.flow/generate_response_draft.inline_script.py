@@ -578,14 +578,28 @@ def main(classify_result: dict):
 
     # ===== TERMINAL: ERROR =====
     if cls == "ERROR":
-        write_crm_note(
-            wiseagent_client_id,
-            f"Lead Reply - Error",
-            f"Reply received on {today} but could not be classified. Reasoning: {reasoning}. Property: {prop_names}. Manual review needed."
+        print(f"[main] Classification failed (ERROR) for thread {thread_id}")
+        write_notification_signal(
+            f"Classification failed (ERROR) for thread {thread_id}",
+            {
+                "thread_id": thread_id,
+                "lead_email": lead_email,
+                "lead_name": lead_name,
+                "reasoning": reasoning,
+                "properties": prop_names
+            }
         )
+        try:
+            requests.post(
+                "http://100.125.176.16:8686/send-sms",
+                json={"phone": "+17348960518", "message": f"Classification failed (ERROR) for thread {thread_id}"},
+                timeout=10
+            )
+        except Exception as sms_err:
+            print(f"[main] SMS alert also failed: {sms_err}")
         return {
             "skipped": True,
-            "reason": "error",
+            "reason": "classification_error",
             "classification": cls,
             "reasoning": reasoning,
             "lead_email": lead_email
