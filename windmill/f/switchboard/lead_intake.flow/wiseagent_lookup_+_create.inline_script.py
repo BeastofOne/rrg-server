@@ -5,6 +5,8 @@
 import wmill
 import requests
 import json
+import time
+import psycopg2
 from datetime import datetime, timezone, timedelta
 
 BASE_URL = "https://sync.thewiseagent.com/http/webconnect.asp"
@@ -26,10 +28,41 @@ def get_token(oauth):
     oauth["access_token"] = new_tokens["access_token"]
     oauth["refresh_token"] = new_tokens.get("refresh_token", oauth["refresh_token"])
     oauth["expires_at"] = new_tokens.get("expires_at", "")
-    try:
-        wmill.set_resource(oauth, "f/switchboard/wiseagent_oauth")
-    except Exception:
-        pass
+    # Save token BEFORE returning — retry up to 3 times
+    save_ok = False
+    for attempt in range(3):
+        try:
+            wmill.set_resource(oauth, "f/switchboard/wiseagent_oauth")
+            save_ok = True
+            break
+        except Exception as e:
+            print(f"[WiseAgent OAuth] wmill.set_resource failed (attempt {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(1.5)
+    if not save_ok:
+        # Last resort: backup to Postgres
+        print("[WiseAgent OAuth] All 3 save attempts failed — writing backup to Postgres")
+        try:
+            pg = wmill.get_resource("f/switchboard/pg")
+            conn = psycopg2.connect(
+                host=pg["host"], port=pg.get("port", 5432),
+                user=pg["user"], password=pg["password"],
+                dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
+            )
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO public.oauth_token_backup (service, token_data, saved_at)
+                    VALUES ('wiseagent', %s::jsonb, NOW())
+                    ON CONFLICT (service) DO UPDATE SET token_data = EXCLUDED.token_data, saved_at = NOW()
+                """, (json.dumps(oauth),))
+                conn.commit()
+                cur.close()
+                print("[WiseAgent OAuth] Postgres backup saved successfully")
+            finally:
+                conn.close()
+        except Exception as backup_err:
+            print(f"[WiseAgent OAuth] CRITICAL — Postgres backup also failed: {backup_err}")
     return oauth["access_token"]
 
 def lookup_contact(token, email):
