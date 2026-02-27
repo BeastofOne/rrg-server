@@ -81,27 +81,24 @@ def get_token(oauth):
 
 def mark_signal_acted(signal_id, acted_by):
     """Mark signal as acted in jake_signals (BUG 2 fix — both branches)."""
+    import psycopg2
+    pg = wmill.get_resource("f/switchboard/pg")
+    conn = psycopg2.connect(
+        host=pg["host"], port=pg.get("port", 5432),
+        user=pg["user"], password=pg["password"],
+        dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
+    )
     try:
-        import psycopg2
-        pg = wmill.get_resource("f/switchboard/pg")
-        conn = psycopg2.connect(
-            host=pg["host"], port=pg.get("port", 5432),
-            user=pg["user"], password=pg["password"],
-            dbname=pg["dbname"], sslmode=pg.get("sslmode", "disable")
-        )
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                UPDATE public.jake_signals
-                SET status = 'acted', acted_by = %s, acted_at = NOW()
-                WHERE id = %s AND status = 'pending'
-            """, (acted_by, signal_id))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    except Exception:
-        pass  # Non-critical — signal may already be acted
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE public.jake_signals
+            SET status = 'acted', acted_by = %s, acted_at = NOW()
+            WHERE id = %s AND status = 'pending'
+        """, (acted_by, signal_id))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
 
 def main(resume_payload: dict, draft_data: dict):

@@ -106,8 +106,8 @@ def write_crm_note(client_id, subject, note_text):
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
             timeout=15
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"CRM note failed: {e}")
 
 
 def write_notification_signal(summary, detail):
