@@ -297,6 +297,21 @@ def schedule_delayed_processing(email):
         timeout=30
     )
 
+    if response.status_code < 200 or response.status_code >= 300:
+        # Roll back the timer lock so the next webhook invocation can retry
+        rollback_conn = get_pg_conn()
+        rollback_cur = rollback_conn.cursor()
+        rollback_cur.execute(
+            "DELETE FROM public.processed_notifications WHERE message_id = %s",
+            (f"timer:{email_lower}",)
+        )
+        rollback_conn.commit()
+        rollback_cur.close()
+        rollback_conn.close()
+        raise RuntimeError(
+            f"Scheduling failed for {email_lower}: HTTP {response.status_code} — {response.text[:200]}"
+        )
+
     return {
         "scheduled": True,
         "status_code": response.status_code,
