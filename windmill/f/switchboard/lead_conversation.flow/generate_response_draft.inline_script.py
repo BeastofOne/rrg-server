@@ -179,7 +179,7 @@ def get_signer_config():
     return json.loads(raw)
 
 
-def determine_signer(source, template_used, sig_config=None, lead_type=""):
+def determine_signer(source, template_used, sig_config=None):
     """Determine sender name, phone, and HTML signature based on source and template continuity."""
     if sig_config is None:
         sig_config = get_signer_config()
