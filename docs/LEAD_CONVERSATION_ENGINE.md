@@ -24,7 +24,7 @@ The lead conversation engine processes replies to outreach emails from commercia
 
 ## Trigger: Reply Detection
 
-The conversation engine is triggered by `f/switchboard/gmail_pubsub_webhook` during its INBOX processing. When an email doesn't match any lead notification format (Crexi, LoopNet, Realtor.com, Seller Hub), it's classified as "Unlabeled." Before applying the Unlabeled label, the webhook checks whether the email is a reply to our outreach:
+The conversation engine is triggered by `f/switchboard/gmail_pubsub_webhook` during its INBOX processing. When an email doesn't match any lead notification format (Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, Social Connect, UpNest), it's classified as "Unlabeled." Before applying the Unlabeled label, the webhook checks whether the email is a reply to our outreach:
 
 ```
 Unlabeled INBOX email arrives
@@ -47,7 +47,7 @@ Unlabeled INBOX email arrives
     { thread_id, message_id, reply_body, reply_subject,
       reply_from, lead_email, lead_name, lead_phone,
       source, source_type, wiseagent_client_id,
-      has_nda, properties, template_used }
+      has_nda, properties, template_used, lead_type }
          │
     POST http://localhost:8000/api/w/rrg/jobs/run/f/f/switchboard/lead_conversation
          │
@@ -77,7 +77,7 @@ The reply_data is enriched with context from the matched signal: lead contact in
 ```
 Input: { thread_id, message_id, reply_body, reply_subject, reply_from,
          lead_email, lead_name, lead_phone, source, source_type,
-         wiseagent_client_id, has_nda, properties, template_used }
+         wiseagent_client_id, has_nda, properties, template_used, lead_type }
 
   Module A              Module B              Module C           Module D
   Classify Reply ───▶  Generate Response ──▶  Approval Gate ──▶  Post-Approval
@@ -118,7 +118,7 @@ Fetches the full Gmail thread via `threads().get()`, formats messages chronologi
 {
   "classification": "INTERESTED|IGNORE|NOT_INTERESTED|ERROR",
   "sub_classification": "OFFER|WANT_SOMETHING|GENERAL_INTEREST|null",
-  "wants": "what the lead is asking for (if WANT_SOMETHING)",
+  "wants": ["tour", "om"],
   "confidence": 0.0-1.0,
   "reasoning": "brief explanation"
 }
@@ -290,4 +290,4 @@ From the original plan, these remain:
 
 ---
 
-*Last updated: February 26, 2026 — Rigid prompt frameworks, three-way source classification, residential buyer/seller prompts, lead magnet redirect, signer continuity via template_used + email_signatures variable. E2E verified for all sources.*
+*Last updated: February 27, 2026 — Fixed wants field type (list of strings), added lead_type to reply_data schema, updated unlabeled detection source list.*

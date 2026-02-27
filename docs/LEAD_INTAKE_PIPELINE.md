@@ -3,7 +3,7 @@
 > **Flow path:** `f/switchboard/lead_intake`
 > **Last verified:** February 19, 2026
 
-The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, and Social Connect. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
+The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBuySell, Realtor.com, Seller Hub, Social Connect, and UpNest. It enriches leads with CRM data, generates personalized Gmail drafts, suspends for human approval, then completes CRM updates and SMS outreach after approval.
 
 ---
 
@@ -33,7 +33,7 @@ The lead intake pipeline processes incoming CRE leads from Crexi, LoopNet, BizBu
 The pipeline is triggered automatically by `f/switchboard/gmail_pubsub_webhook`. This webhook handles Gmail Pub/Sub push notifications from **two accounts** — each with its own OAuth resource and history cursor.
 
 **Split inbox architecture:**
-- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect)
+- **leads@resourcerealtygroupmi.com** — receives lead notifications (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect/UpNest)
 - **teamgotcher@gmail.com** — sends drafts, receives replies to outreach
 
 Pub/Sub push notifications arrive within ~2-5 seconds via Tailscale Funnel (`https://rrg-server.tailc01f9b.ts.net:8443`).
@@ -58,12 +58,13 @@ Gmail Pub/Sub notification → Windmill webhook
     │ subject: "New realtor.com lead…" → label "Realtor.com"    │
     │ subject: "New Verified Seller…"  → label "Seller Hub"     │
     │ subject: "…Social Connect…"      → label "Social Connect" │
+    │ upnest.com + "Lead claimed"     → label "UpNest"         │
     │ everything else                  → label "Unlabeled"      │
     └─────────────────────────────────────────────────────────┘
          │
     Apply Gmail label to message
          │
-    Is it a lead source? (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect)
+    Is it a lead source? (Crexi/LoopNet/BizBuySell/Realtor.com/Seller Hub/Social Connect/UpNest)
     ┌────┴────┐
     │  yes    │──── no ─── Is it a reply to outreach?
     └────┬────┘            (thread_id matches acted signal)
@@ -108,6 +109,7 @@ Gmail Pub/Sub notification → Windmill webhook
 | Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes — generic parser (labeled: `First Name:`, `Email Address:`, `Phone Number:`) |
 | Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes — generic parser (labeled: `Seller Name:`, `Email:`, `Phone Number:`) |
 | Social Connect | — | Contains "Social Connect" | "Social Connect" | Yes — dedicated parser (label/value pairs on alternating lines: `Name\n[value]\nEmail\n[value]`) |
+| UpNest | `upnest.com` | Contains "Lead claimed" | "UpNest" | Yes — dedicated parser (lead_type from subject, contact info from body) |
 | Reply to outreach | — | — (thread_id matches acted signal) | "Lead Reply" | No (triggers `lead_conversation`) |
 | Everything else | — | — | "Unlabeled" | No |
 
@@ -115,7 +117,7 @@ Gmail Pub/Sub notification → Windmill webhook
 - **Dedicated parsers** (`parse_crexi_lead`, `parse_social_connect_lead`): Handle non-standard formats that don't use label prefixes
 - **Generic parser** (`parse_lead_from_notification` → `parse_email_field`/`parse_name_field`/`parse_phone_field`): Handles labeled formats (`Key: Value`) with subject-line name fallback and bare-line phone fallback
 - **Email exclusion**: Filters out system/notification sender domains (crexi.com, loopnet.com, etc.) and specific addresses (support@crexi.com, teamgotcher@gmail.com). gmail.com is NOT excluded — most Crexi leads use personal Gmail
-- **Crexi source types**: `crexi_om`, `crexi_ca`, `crexi_info_request`, `crexi_brochure`, `crexi_floorplan`, `crexi_flyer`
+- **Crexi source type**: `crexi` (collapsed from separate sub-types — no more `crexi_om`, `crexi_flyer`, etc.)
 
 **Lead parser output** (per lead, passed to `lead_intake` flow):
 ```json
@@ -124,7 +126,7 @@ Gmail Pub/Sub notification → Windmill webhook
     "email": "john@example.com",
     "phone": "(555) 123-4567",
     "source": "Crexi",
-    "source_type": "crexi_om",
+    "source_type": "crexi",
     "property_name": "Dairy Queen",
     "notification_message_id": "msg_abc123"
 }
@@ -218,7 +220,7 @@ New contact creations are logged to the `contact_creation_log` Postgres table fo
 
 Matches lead property names against the `f/switchboard/property_mapping` Windmill variable. This variable contains a JSON mapping of property aliases to canonical names with metadata.
 
-Only applies to `crexi_om`, `crexi_flyer`, `loopnet`, and `bizbuysell` source types. Other source types get `is_mapped: null`.
+Only applies to `crexi`, `loopnet`, and `bizbuysell` source types. Other source types get `is_mapped: null`.
 
 **Fields added to each lead:**
 - `is_mapped` — true/false/null
@@ -240,7 +242,7 @@ Only applies to `crexi_om`, `crexi_flyer`, `loopnet`, and `bizbuysell` source ty
 | **Input** | `results.b` |
 | **Output** | `{ standard_leads[], info_requests[], total, info_request_count, multi_property_count }` |
 
-Groups leads by email address so that one person who inquired about multiple properties gets a single multi-property email instead of separate emails. Separates `crexi_info_request` source types into a distinct list.
+Groups leads by email address so that one person who inquired about multiple properties gets a single multi-property email instead of separate emails.
 
 Each grouped lead carries all properties as a `properties[]` array and collects all `notification_message_ids` from the original leads.
 
@@ -265,14 +267,15 @@ The largest module. Selects an email template for each lead based on source type
 
 | Priority | Source Type | Condition | Template | Signed By |
 |----------|------------|-----------|----------|-----------|
-| 1 | `realtor_com` | — | Tour inquiry response | Jake |
-| 2 | `seller_hub` | — | Seller outreach | Jake |
-| 3 | Any | All properties are lead magnets | Lead magnet response (uses `response_override`) | Jake |
-| 4 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
-| 5 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
-| 6 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Single property, followup | `commercial_followup_template` | Larry |
-| 7 | `crexi_om` / `crexi_flyer` / `loopnet` / `bizbuysell` | Single property, first contact | `commercial_first_outreach_template` | Larry |
-| 8 | Unknown | — | Skip (no draft created) | — |
+| 1 | `realtor_com` | — | Tour inquiry response | Andrea |
+| 2 | `upnest` | lead_type = buyer | Buyer introduction | Andrea |
+| 3 | `seller_hub` / `social_connect` / `upnest` (seller) | — | Seller outreach | Andrea |
+| 4 | Any | All properties are lead magnets | Lead magnet response (uses `response_override`) | Larry |
+| 5 | `crexi` / `loopnet` / `bizbuysell` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
+| 6 | `crexi` / `loopnet` / `bizbuysell` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
+| 7 | `crexi` / `loopnet` / `bizbuysell` | Single property, followup | `commercial_followup_template` | Larry |
+| 8 | `crexi` / `loopnet` / `bizbuysell` | Single property, first contact | `commercial_first_outreach_template` | Larry |
+| 9 | Unknown | — | Skip (no draft created) | — |
 
 **Commercial templates (Crexi/LoopNet/BizBuySell):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
 
@@ -489,7 +492,7 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 
 ```
 1. Call f/switchboard/get_pending_draft_signals via Windmill API
-   → Returns all pending lead_intake signals with draft_id_map
+   → Returns all pending signals (lead_intake + lead_conversation) with draft_id_map
          │
 2. For each signal, for each draft_id in draft_id_map:
          │
@@ -541,7 +544,7 @@ Detects when Jake deletes a lead intake draft (rejection). Low priority, runs da
 
 | Script | Purpose |
 |--------|---------|
-| `get_pending_draft_signals` | Query pending lead_intake signals with draft_id_map (used by Apps Script) |
+| `get_pending_draft_signals` | Query pending signals with draft_id_map (used by Apps Script) |
 | `gmail_pubsub_webhook` | Processes Gmail Pub/Sub push notifications — split inbox: leads@ for notifications, teamgotcher@ for SENT/replies |
 | `gmail_polling_trigger` | DEPRECATED — kept as emergency fallback, schedule disabled |
 | `setup_gmail_watch` | Sets up Gmail SENT + INBOX label watch on teamgotcher@, renew every 6 days |
@@ -607,4 +610,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 23, 2026 — Module C fuzzy property dedup, Module D canonical_name fallback for city-only addresses, webhook 30s batch window.*
+*Last updated: February 27, 2026 — UpNest source added, Crexi source types collapsed, signers corrected (Andrea for residential, Larry for commercial + lead magnets), Apps Script covers lead_conversation signals.*
