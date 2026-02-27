@@ -37,7 +37,7 @@ def get_token(oauth):
             pass
     resp = requests.post(TOKEN_URL, json={"grant_type": "refresh_token", "refresh_token": oauth["refresh_token"], "client_id": oauth.get("client_id", ""), "client_secret": oauth.get("client_secret", "")})
     resp.raise_for_status()
-    new_tokens = resp.json()
+    new_tokens = json.loads(resp.text, strict=False)
     oauth["access_token"] = new_tokens["access_token"]
     oauth["refresh_token"] = new_tokens.get("refresh_token", oauth["refresh_token"])
     oauth["expires_at"] = new_tokens.get("expires_at", "")
@@ -45,7 +45,7 @@ def get_token(oauth):
     save_ok = False
     for attempt in range(3):
         try:
-            wmill.set_resource(oauth, "f/switchboard/wiseagent_oauth")
+            wmill.set_resource("f/switchboard/wiseagent_oauth", oauth)
             save_ok = True
             break
         except Exception as e:

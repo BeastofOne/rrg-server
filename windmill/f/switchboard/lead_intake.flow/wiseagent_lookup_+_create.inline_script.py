@@ -24,7 +24,7 @@ def get_token(oauth):
             pass
     resp = requests.post(TOKEN_URL, json={"grant_type": "refresh_token", "refresh_token": oauth["refresh_token"], "client_id": oauth.get("client_id", ""), "client_secret": oauth.get("client_secret", "")})
     resp.raise_for_status()
-    new_tokens = resp.json()
+    new_tokens = json.loads(resp.text, strict=False)
     oauth["access_token"] = new_tokens["access_token"]
     oauth["refresh_token"] = new_tokens.get("refresh_token", oauth["refresh_token"])
     oauth["expires_at"] = new_tokens.get("expires_at", "")
@@ -32,7 +32,7 @@ def get_token(oauth):
     save_ok = False
     for attempt in range(3):
         try:
-            wmill.set_resource(oauth, "f/switchboard/wiseagent_oauth")
+            wmill.set_resource("f/switchboard/wiseagent_oauth", oauth)
             save_ok = True
             break
         except Exception as e:
@@ -68,7 +68,7 @@ def get_token(oauth):
 def lookup_contact(token, email):
     resp = requests.get(BASE_URL, params={"requestType": "getContacts", "email": email}, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
     resp.raise_for_status()
-    contacts = resp.json()
+    contacts = json.loads(resp.text, strict=False)
     if not contacts:
         return None
     return contacts[0]
@@ -86,7 +86,7 @@ def check_followup(token, client_id):
     try:
         resp = requests.get(BASE_URL, params={"requestType": "getContactNotes", "ClientID": str(client_id)}, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
         resp.raise_for_status()
-        notes = resp.json()
+        notes = json.loads(resp.text, strict=False)
         if isinstance(notes, list):
             now = datetime.now(timezone.utc)
             cutoff = now - timedelta(days=7)
@@ -223,7 +223,7 @@ def main(leads: list):
                         timeout=15
                     )
                     resp.raise_for_status()
-                    create_resp = resp.json()
+                    create_resp = json.loads(resp.text, strict=False)
                     client_id = extract_field(create_resp, "ClientID") or extract_field(create_resp, "clientID")
                     last_error = None
                     break
