@@ -86,6 +86,7 @@ def main(email: str):
 
     # 3. Trigger one lead_intake flow with all leads for this person
     token = wmill.get_variable("f/switchboard/router_token")
+    trigger_failed = False
     try:
         response = requests.post(
             f"{WM_API_BASE}/api/w/rrg/jobs/run/f/f/switchboard/lead_intake",
@@ -94,22 +95,48 @@ def main(email: str):
             timeout=30
         )
         intake_status = response.status_code
+        if response.status_code < 200 or response.status_code >= 300:
+            trigger_failed = True
     except Exception as e:
         intake_status = f"error: {str(e)}"
+        trigger_failed = True
 
-    # 4. Clean up batch timer so future leads for this email can schedule new timers
-    try:
+    if trigger_failed:
+        # Unclaim leads so they can be retried
         conn = get_pg_conn()
         cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM public.processed_notifications WHERE message_id = %s",
-            (f"timer:{email_lower}",)
-        )
+        cur.execute("""
+            UPDATE public.staged_leads
+            SET processed = FALSE, processed_at = NULL
+            WHERE id = ANY(%s)
+        """, (list(claimed_ids),))
         conn.commit()
         cur.close()
         conn.close()
-    except Exception:
-        pass  # Non-critical — timer will expire after 7 days anyway
+
+        # Alert Jake via SMS gateway
+        try:
+            requests.post(
+                "http://100.125.176.16:8686/send-sms",
+                json={"phone": "+17348960518", "message": f"Lead processing failed for {email_lower}. Leads unclaimed for retry."},
+                timeout=10
+            )
+        except Exception:
+            pass  # SMS failure is non-critical, Windmill logs will show the error
+
+        raise RuntimeError(f"lead_intake trigger failed for {email_lower}: {intake_status}")
+
+    # 4. Clean up batch timer so future leads for this email can schedule new timers
+    # Only delete on success — keep timer intact during retries
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM public.processed_notifications WHERE message_id = %s",
+        (f"timer:{email_lower}",)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
     return {
         "email": email_lower,
