@@ -14,7 +14,7 @@ def main(leads: list):
         result = dict(lead)
         prop_name = lead.get("property_name", "").strip()
         source_type = lead.get("source_type", "")
-        if source_type in ("crexi_om", "crexi_flyer", "loopnet", "bizbuysell"):
+        if source_type in ("crexi", "loopnet", "bizbuysell"):
             matched = alias_map.get(prop_name.lower())
             if matched:
                 result["is_mapped"] = True

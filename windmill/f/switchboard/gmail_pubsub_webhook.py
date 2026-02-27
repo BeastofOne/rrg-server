@@ -391,25 +391,6 @@ def validate_lead(lead):
 # Lead parsing from notification bodies
 # ============================================================
 
-def determine_crexi_source_type(subject, body):
-    """Determine Crexi notification type from subject/body."""
-    text = (subject + " " + body).lower()
-    if "requesting information" in text or "request information" in text:
-        return "crexi_info_request"
-    if "executed" in text and "ca" in text:
-        return "crexi_ca"
-    if "offering memorandum" in text or "opened your om" in text or "opened the om" in text:
-        return "crexi_om"
-    if "brochure" in text:
-        return "crexi_brochure"
-    if "floorplan" in text or "floor plan" in text:
-        return "crexi_floorplan"
-    if "flyer" in text or "downloaded" in text:
-        return "crexi_flyer"
-    if "clicked" in text:
-        return "crexi_phone_click"
-    return "crexi_om"
-
 
 # Specific email addresses to always exclude from lead parsing
 EXCLUDED_EMAIL_ADDRESSES = {
@@ -611,7 +592,7 @@ def parse_crexi_lead(service, msg_id, sender, subject):
             property_name = prop
 
     # Source type from subject/body
-    source_type = determine_crexi_source_type(subject, body)
+    source_type = "crexi"
 
     if not email and not name:
         return None
@@ -1117,12 +1098,16 @@ def main(message: dict = None):
                         signal = find_and_update_signal_by_thread(thread_id)
 
                         if signal:
-                            resume_result = trigger_resume(
-                                signal['resume_url'],
-                                signal['signal_id'],
-                                signal['matched_draft_id']
-                            )
-                            status_code = resume_result.get("status_code", 0)
+                            try:
+                                resume_result = trigger_resume(
+                                    signal['resume_url'],
+                                    signal['signal_id'],
+                                    signal['matched_draft_id']
+                                )
+                                status_code = resume_result.get("status_code", 0)
+                            except Exception as resume_err:
+                                print(f"[C4] trigger_resume() exception: {resume_err}")
+                                status_code = 0
 
                             # If resume failed (5xx or timeout/no response), roll back
                             # signal to pending so next webhook run retries
@@ -1138,8 +1123,8 @@ def main(message: dict = None):
                                     conn.commit()
                                     cur.close()
                                     conn.close()
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    print(f"[C4] Signal rollback failed: {e}")
                                 raise RuntimeError(
                                     f"Resume failed with status {status_code} for signal {signal['signal_id']}"
                                 )

@@ -15,11 +15,7 @@ def is_same_property(name1, name2):
 
 def main(leads: list):
     groups = {}
-    info_requests = []
     for lead in leads:
-        if lead.get("source_type") == "crexi_info_request":
-            info_requests.append(lead)
-            continue
         email = lead.get("email", "").strip().lower()
         if not email:
             continue
@@ -46,4 +42,4 @@ def main(leads: list):
             groups[email]["notification_message_ids"].append(msg_id)
     standard_leads = list(groups.values())
     multi_property_count = sum(1 for g in standard_leads if len(g["properties"]) > 1)
-    return {"standard_leads": standard_leads, "info_requests": info_requests, "total": len(standard_leads), "info_request_count": len(info_requests), "multi_property_count": multi_property_count}
+    return {"standard_leads": standard_leads, "info_requests": [], "total": len(standard_leads), "info_request_count": 0, "multi_property_count": multi_property_count}
