@@ -1300,7 +1300,22 @@ def main(message: dict = None):
             except Exception as e:
                 schedule_results.append({"email": email, "error": str(e)})
 
-    # 9. Update last history ID
+    # 9. Fail-fast: block history ID advancement on reply-trigger or scheduling errors
+    reply_errors = [e for e in errors if e.get("path") == "INBOX_REPLY"]
+    if reply_errors:
+        raise RuntimeError(
+            f"Reply trigger failed for {len(reply_errors)} message(s): "
+            + "; ".join(e.get("error", "") for e in reply_errors)
+        )
+
+    scheduling_errors = [r for r in schedule_results if "error" in r]
+    if scheduling_errors:
+        raise RuntimeError(
+            f"Scheduling failed for {len(scheduling_errors)} email(s): "
+            + "; ".join(f"{r['email']}: {r['error']}" for r in scheduling_errors)
+        )
+
+    # 10. Update last history ID
     # Always advance — staging never fails in a way that should block progress
     try:
         if int(new_history_id) > int(last_history):
