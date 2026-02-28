@@ -617,4 +617,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 27, 2026 — UpNest source added, Crexi source types collapsed, signers corrected (Andrea for residential, Larry for commercial + lead magnets), Apps Script covers lead_conversation signals.*
+*Last updated: February 28, 2026 — BizBuySell split from commercial templates (business language, own priority 4 block with 5 templates), classify script updated with business-for-sale wants list.*

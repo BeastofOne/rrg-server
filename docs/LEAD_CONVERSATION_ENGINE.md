@@ -292,4 +292,4 @@ From the original plan, these remain:
 
 ---
 
-*Last updated: February 27, 2026 — Fixed wants field type (list of strings), added lead_type to reply_data schema, updated unlabeled detection source list.*
+*Last updated: February 28, 2026 — BizBuySell split from commercial prompts (business listing language, own classify/response branches), signature fallbacks updated with prefix matching.*
