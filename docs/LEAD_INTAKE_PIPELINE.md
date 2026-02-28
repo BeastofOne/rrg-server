@@ -108,7 +108,7 @@ Gmail Pub/Sub notification → Windmill webhook
 | BizBuySell | `bizbuysell.com` | — | "BizBuySell" | Yes — generic parser (labeled: `Contact Name:`, `Contact Email:`, `Contact Phone:`) |
 | Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes — generic parser (labeled: `First Name:`, `Email Address:`, `Phone Number:`) |
 | Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes — generic parser (labeled: `Seller Name:`, `Email:`, `Phone Number:`) |
-| Social Connect | — | Contains "Social Connect" | "Social Connect" | Yes — dedicated parser (label/value pairs on alternating lines: `Name\n[value]\nEmail\n[value]`) |
+| Social Connect | — | Contains "Social Connect" | "Social Connect" | Yes — dedicated parser (label/value pairs on alternating lines: `Name\n[value]\nEmail\n[value]\nLead Type\n[Buyer/Seller]`) |
 | UpNest | `upnest.com` | Contains "Lead claimed" | "UpNest" | Yes — dedicated parser (lead_type from subject, contact info from body) |
 | Reply to outreach | — | — (thread_id matches acted signal) | "Lead Reply" | No (triggers `lead_conversation`) |
 | Everything else | — | — | "Unlabeled" | No |
@@ -268,8 +268,8 @@ The largest module. Selects an email template for each lead based on source type
 | Priority | Source Type | Condition | Template | Signed By |
 |----------|------------|-----------|----------|-----------|
 | 1 | `realtor_com` | — | Tour inquiry response | Andrea |
-| 2 | `upnest` | lead_type = buyer | Buyer introduction | Andrea |
-| 3 | `seller_hub` / `social_connect` / `upnest` (seller) | — | Seller outreach | Andrea |
+| 2 | `upnest` / `social_connect` | lead_type = buyer | Buyer introduction | Andrea |
+| 3 | `seller_hub` / `social_connect` (seller) / `upnest` (seller) | — | Seller outreach | Andrea |
 | 4 | `bizbuysell` | Lead magnet | `bizbuysell_lead_magnet` | Larry |
 | 4 | `bizbuysell` | Multiple businesses, followup | `bizbuysell_multi_followup` | Larry |
 | 4 | `bizbuysell` | Multiple businesses, first contact | `bizbuysell_multi_first_contact` | Larry |
@@ -617,4 +617,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 28, 2026 — BizBuySell split from commercial templates (business language, own priority 4 block with 5 templates), classify script updated with business-for-sale wants list.*
+*Last updated: February 28, 2026 — Social Connect parser now extracts lead_type (buyer/seller) and routes buyers to residential buyer template instead of seller template.*

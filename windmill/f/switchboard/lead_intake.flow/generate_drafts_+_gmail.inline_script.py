@@ -291,8 +291,8 @@ def main(grouped_data: dict):
             draft["sms_body"] = f"Hey {first_name}, this is Andrea. I received your Realtor.com inquiry about {addr}. If you'd like more information or to schedule a tour, just let me know the best day & time that works for you and I'll get that scheduled. Keep in mind the sooner, the better as properties sell quickly." if phone else None
             draft["template_used"] = "realtor_com"
 
-        # 2. UpNest buyer (residential buyer, signed Andrea)
-        elif source.lower() == "upnest" and lead.get("lead_type") == "buyer":
+        # 2. UpNest / Social Connect buyer (residential buyer, signed Andrea)
+        elif source.lower() in ("upnest", "social connect") and lead.get("lead_type") == "buyer":
             city = get_city(lead, properties)
             city_text = f" in {city}" if city else ""
             draft["email_subject"] = "Introductions, Buying a home?"

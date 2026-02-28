@@ -644,6 +644,7 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
     name = ""
     email = ""
     phone = ""
+    lead_type = ""
     property_name = ""
 
     for i, line in enumerate(lines):
@@ -660,6 +661,8 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
                     email = candidate
         elif lower == 'phone' and i + 1 < len(lines):
             phone = lines[i + 1]
+        elif lower == 'lead type' and i + 1 < len(lines):
+            lead_type = lines[i + 1].strip().lower()
         elif lower == 'property' and i + 1 < len(lines):
             property_name = lines[i + 1]
 
@@ -678,6 +681,7 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
         "phone": phone,
         "source": "Social Connect",
         "source_type": "social_connect",
+        "lead_type": lead_type,
         "property_name": property_name,
         "notification_message_id": msg_id
     }
