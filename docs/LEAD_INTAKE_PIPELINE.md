@@ -106,7 +106,7 @@ Gmail Pub/Sub notification → Windmill webhook
 | Crexi | `notifications.crexi.com` | — | "Crexi" | Yes — dedicated parser (bare-line format: name from subject, email/phone on standalone lines) |
 | LoopNet | `loopnet.com` | Contains "favorited" | "LoopNet" | Yes — generic parser (name from subject only, rarely has email/phone) |
 | BizBuySell | `bizbuysell.com` | — | "BizBuySell" | Yes — generic parser (labeled: `Contact Name:`, `Contact Email:`, `Contact Phone:`) |
-| Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes — generic parser (labeled: `First Name:`, `Email Address:`, `Phone Number:`) |
+| Realtor.com | — | Starts with "New realtor.com lead" | "Realtor.com" | Yes — dedicated parser (`First Name:` + `Last Name:`, `Email Address:`, `Phone Number:`, multi-line `Property Address:`) |
 | Seller Hub | — | Contains "New Verified Seller Lead" | "Seller Hub" | Yes — generic parser (labeled: `Seller Name:`, `Email:`, `Phone Number:`) |
 | Social Connect | — | Contains "Social Connect" | "Social Connect" | Yes — dedicated parser (label/value pairs on alternating lines: `Name\n[value]\nEmail\n[value]\nLead Type\n[Buyer/Seller]`) |
 | UpNest | `upnest.com` | Contains "Lead claimed" | "UpNest" | Yes — dedicated parser (lead_type from subject, contact info from body) |
@@ -114,7 +114,7 @@ Gmail Pub/Sub notification → Windmill webhook
 | Everything else | — | — | "Unlabeled" | No |
 
 **Parser architecture:**
-- **Dedicated parsers** (`parse_crexi_lead`, `parse_social_connect_lead`): Handle non-standard formats that don't use label prefixes
+- **Dedicated parsers** (`parse_crexi_lead`, `parse_social_connect_lead`, `parse_realtor_com_lead`): Handle non-standard formats that don't use label prefixes
 - **Generic parser** (`parse_lead_from_notification` → `parse_email_field`/`parse_name_field`/`parse_phone_field`): Handles labeled formats (`Key: Value`) with subject-line name fallback and bare-line phone fallback
 - **Email exclusion**: Filters out system/notification sender domains (crexi.com, loopnet.com, etc.) and specific addresses (support@crexi.com, teamgotcher@gmail.com). gmail.com is NOT excluded — most Crexi leads use personal Gmail
 - **Crexi source type**: `crexi` (collapsed from separate sub-types — no more `crexi_om`, `crexi_flyer`, etc.)
@@ -617,4 +617,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 28, 2026 — BizBuySell split from commercial templates (business language, own priority 4 block with 5 templates); Social Connect parser now extracts lead_type (buyer/seller) and routes buyers to residential buyer template.*
+*Last updated: February 28, 2026 — BizBuySell template split; Social Connect lead_type parsing; Realtor.com dedicated parser (name, email, phone, property address from body); get_city 4-part address fix.*
