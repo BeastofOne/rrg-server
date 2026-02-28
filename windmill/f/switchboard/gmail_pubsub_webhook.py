@@ -794,7 +794,7 @@ def parse_realtor_com_lead(service, msg_id, sender, subject):
 
     # Phone Number
     phone = ""
-    m = re.search(r'Phone Number:\s*([\d\-\(\)\+\s\.]+)', body)
+    m = re.search(r'Phone Number:\s*([\d\-\(\)\+\. ]{7,20})', body)
     if m:
         phone = m.group(1).strip()
 
@@ -822,7 +822,7 @@ def parse_realtor_com_lead(service, msg_id, sender, subject):
         "phone": phone,
         "source": "Realtor.com",
         "source_type": "realtor_com",
-        "lead_type": "buyer",
+        "lead_type": "buyer",  # Realtor.com notifications are buyer inquiries only
         "property_name": property_address,
         "property_address": property_address,
         "notification_message_id": msg_id
