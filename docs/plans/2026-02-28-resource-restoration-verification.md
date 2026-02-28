@@ -66,13 +66,7 @@ required = ['client_id', 'client_secret', 'refresh_token']
 missing = [k for k in required if not oauth.get(k)]
 assert not missing, f'wiseagent_oauth missing: {missing}'
 
-# Try to refresh the access token
-refresh_data = urllib.parse.urlencode({
-    'grant_type': 'refresh_token',
-    'client_id': oauth['client_id'],
-    'client_secret': oauth['client_secret'],
-    'refresh_token': oauth['refresh_token']
-}).encode()
+# Try to refresh the access token (correct URL from Windmill flow code)
 import urllib.parse
 refresh_data = urllib.parse.urlencode({
     'grant_type': 'refresh_token',
@@ -80,15 +74,15 @@ refresh_data = urllib.parse.urlencode({
     'client_secret': oauth['client_secret'],
     'refresh_token': oauth['refresh_token']
 }).encode()
-req2 = urllib.request.Request('https://auth.wiseagent.com/connect/token', data=refresh_data,
+req2 = urllib.request.Request('https://sync.thewiseagent.com/WiseAuth/token', data=refresh_data,
     headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
 resp2 = urllib.request.urlopen(req2)
 tokens = json.loads(resp2.read())
 access_token = tokens.get('access_token', '')
 assert access_token, 'Failed to obtain WiseAgent access token'
 
-# Test API call: search for a contact
-req3 = urllib.request.Request('https://api.wiseagent.com/api/v1/contacts?search=test&pageSize=1',
+# Test API call: search for a contact via WiseAgent webconnect
+req3 = urllib.request.Request('https://sync.thewiseagent.com/http/webconnect.asp?function=searchContacts&searchTerm=test&pageSize=1',
     headers={'Authorization': f'Bearer {access_token}'})
 resp3 = urllib.request.urlopen(req3)
 print(f'WiseAgent API response: {resp3.status}')
