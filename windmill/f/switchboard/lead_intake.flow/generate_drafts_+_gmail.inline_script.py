@@ -260,6 +260,8 @@ def main(grouped_data: dict):
         non_magnet_props = [p for p in properties if not p.get("lead_magnet")]
         is_commercial = source.lower() in ("crexi", "loopnet")
         is_bizbuysell = source.lower() == "bizbuysell"
+        # Note: UpNest/Social Connect buyers also match here by source, but they
+        # exit at priority 2 (buyer check) before this flag is consulted at priority 3
         is_residential_seller = source.lower() in ("seller hub", "social connect", "upnest")
 
         draft = {

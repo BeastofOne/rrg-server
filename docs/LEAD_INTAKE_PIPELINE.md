@@ -617,4 +617,4 @@ Pub/Sub push subscriptions deliver notifications directly to the webhook via Tai
 
 ---
 
-*Last updated: February 28, 2026 — Social Connect parser now extracts lead_type (buyer/seller) and routes buyers to residential buyer template instead of seller template.*
+*Last updated: February 28, 2026 — BizBuySell split from commercial templates (business language, own priority 4 block with 5 templates); Social Connect parser now extracts lead_type (buyer/seller) and routes buyers to residential buyer template.*
