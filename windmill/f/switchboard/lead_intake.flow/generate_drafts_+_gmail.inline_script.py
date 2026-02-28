@@ -121,12 +121,17 @@ def get_city(lead, properties):
     if city:
         return city
 
-    # Extract from property_address: '123 Main St, Adrian, MI 49221' → 'Adrian'
+    # Extract from property_address:
+    #   '123 Main St, Adrian, MI 49221' → 'Adrian' (3 parts, city at [1])
+    #   '604 Brierwood Court, Ann Arbor City, MI, 48103' → 'Ann Arbor City' (4 parts, city at [1])
+    #   'South Lyon, MI' → 'South Lyon' (2 parts, city at [0])
     if properties:
         addr = properties[0].get("property_address", "")
         parts = [p.strip() for p in addr.split(",")] if addr else []
-        if len(parts) >= 2:
-            return parts[-2] if len(parts) >= 3 else parts[0]
+        if len(parts) >= 3:
+            return parts[1]
+        elif len(parts) == 2:
+            return parts[0]
 
     return ""
 
