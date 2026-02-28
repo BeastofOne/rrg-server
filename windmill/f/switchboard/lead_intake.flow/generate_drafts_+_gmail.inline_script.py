@@ -215,19 +215,21 @@ def get_html_signature(source, template_used, sig_config):
             return "Talk soon,<br>Andrea<br>(734) 223-1015"
 
     # Check template_used first (in-flight thread continuity)
-    for prefix, signer_key in sig_config.get("template_prefix_to_signer", {}).items():
-        if template_used == prefix or template_used.startswith(prefix):
-            signer = signers.get(signer_key, {})
-            if signer:
-                return signer.get("html_signature", "")
+    template_map = sig_config.get("template_to_signer", {})
+    signer_key = template_map.get(template_used)
+    if signer_key:
+        signer = signers.get(signer_key, {})
+        if signer:
+            return signer.get("html_signature", "")
 
-    # Fall back to source classification
+    # Fall back to source classification (flat map: source_type → signer key)
     src = source.lower()
-    for group in sig_config.get("source_to_signer", {}).values():
-        if src in group["sources"]:
-            signer = signers.get(group["signer"], {})
-            if signer:
-                return signer.get("html_signature", "")
+    source_map = sig_config.get("source_to_signer", {})
+    signer_key = source_map.get(src)
+    if signer_key:
+        signer = signers.get(signer_key, {})
+        if signer:
+            return signer.get("html_signature", "")
 
     # Default
     default_key = sig_config.get("default_signer", "larry")
