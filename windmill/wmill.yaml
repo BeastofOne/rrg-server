@@ -1,0 +1,20 @@
+# Windmill CLI sync configuration
+# Codifies the --skip-* and --include-* flags from sync-pull.sh as defaults.
+# A bare `wmill sync push` is now safe (won't wipe resources/variables/secrets).
+includes:
+  - "f/**"
+excludes: []
+defaultTs: "bun"
+skipVariables: true
+skipResources: true
+skipSecrets: true
+skipResourceTypes: true
+skipScripts: false
+skipFlows: false
+skipApps: false
+skipFolders: false
+includeSchedules: true
+includeTriggers: true
+includeUsers: false
+includeGroups: false
+includeSettings: false
