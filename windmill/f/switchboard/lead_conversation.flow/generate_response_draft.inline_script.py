@@ -188,7 +188,7 @@ def determine_signer(source, template_used, sig_config=None):
     if not signers:
         # Hardcoded fallback when email_signatures config is missing
         src = source.lower()
-        is_commercial = src in ("crexi", "loopnet", "bizbuysell") or template_used in ("lead_magnet", "commercial_first_outreach_template", "commercial_followup_template", "commercial_multi_property_first_contact", "commercial_multi_property_followup")
+        is_commercial = src in ("crexi", "loopnet", "bizbuysell") or template_used.startswith(("bizbuysell_", "commercial_")) or template_used == "lead_magnet"
         if is_commercial:
             return "Larry", "(734) 732-3789", "Talk soon,<br>Larry<br>(734) 732-3789"
         else:
@@ -211,7 +211,7 @@ def determine_signer(source, template_used, sig_config=None):
 
     # Default — follow commercial/residential split based on source
     src = source.lower()
-    is_commercial = src in ("crexi", "loopnet", "bizbuysell") or template_used in ("lead_magnet", "commercial_first_outreach_template", "commercial_followup_template", "commercial_multi_property_first_contact", "commercial_multi_property_followup")
+    is_commercial = src in ("crexi", "loopnet", "bizbuysell") or template_used.startswith(("bizbuysell_", "commercial_")) or template_used == "lead_magnet"
     if is_commercial:
         default_key = sig_config.get("default_signer", "larry")
     else:
@@ -444,7 +444,7 @@ RULES:
 
             # Build NDA context
             if not has_nda:
-                nda_context = "The lead has NOT signed an NDA. If they ask for financials, rent roll, or T12, tell them these require an NDA and offer to send one."
+                nda_context = "The lead has NOT signed an NDA. If they ask for financials, P&L statements, or tax returns, tell them these require an NDA and offer to send one."
             else:
                 nda_context = "The lead HAS signed an NDA. Financials can be shared."
 

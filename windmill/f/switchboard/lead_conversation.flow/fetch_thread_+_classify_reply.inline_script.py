@@ -120,12 +120,17 @@ def classify_with_claude(thread_messages, reply_body, lead_name, properties, has
         is_residential_seller = False
         is_residential_buyer = True
 
+    is_bizbuysell = src == "bizbuysell" or template_used.startswith("bizbuysell_")
+
     if is_residential_seller:
         context_line = "You are classifying a reply in a residential real estate email thread. The lead was contacted about selling their home."
         wants_line = "tour, cma, home_value, commission, timeline, staging, repairs, listing_agreement, market_conditions, still_interested, other"
     elif is_residential_buyer:
         context_line = "You are classifying a reply in a residential real estate email thread. The lead inquired about buying a home."
         wants_line = "tour, more_info, price, availability, similar_homes, neighborhood, schools, mortgage, still_available, other"
+    elif is_bizbuysell:
+        context_line = "You are classifying a reply in a business-for-sale email thread."
+        wants_line = "tour, brochure, om, financials, revenue, cash_flow, price, inventory, lease, staff, still_available, why_selling, seller_terms, nda, other"
     else:
         context_line = "You are classifying a reply in a commercial real estate email thread."
         wants_line = "tour, brochure, om, financials, rent_roll, t12, proforma, price, zoning, size, units, hoa, broker_coop, still_available, why_selling, seller_terms, nda, other"

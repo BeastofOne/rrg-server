@@ -109,7 +109,8 @@ Fetches the full Gmail thread via `threads().get()`, formats messages chronologi
 **Claude CLI:** Uses `subprocess.run(["claude", "-p", ...])` calling the Claude CLI installed in the Windmill worker container (`/usr/local/bin/claude`, teamgotcher account). Env vars `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_MODEL` passed through via `WHITELIST_ENVS`.
 
 **Classification prompt branches by source type:**
-- **Commercial** (Crexi, LoopNet, BizBuySell): CRE-specific wants (tour, om, financials, rent_roll, nda, etc.)
+- **BizBuySell**: Business-for-sale wants (tour, om, financials, revenue, cash_flow, nda, etc.)
+- **Commercial** (Crexi, LoopNet): CRE-specific wants (tour, om, financials, rent_roll, nda, etc.)
 - **Residential buyer** (Realtor.com, UpNest buyer): Home-buying wants (tour, more_info, price, similar_homes, etc.)
 - **Residential seller** (Seller Hub, Social Connect, UpNest seller): Home-selling wants (cma, home_value, commission, timeline, etc.)
 
@@ -164,10 +165,11 @@ draft = service.users().drafts().create(
 
 Drafts include `In-Reply-To` and `References` headers pointing to the reply's `Message-ID` so they thread correctly.
 
-**Signing convention:** Determined by `determine_signer()` using the `f/switchboard/email_signatures` Windmill variable. Commercial leads (Crexi/LoopNet/BizBuySell) signed by Larry. Residential leads (Realtor.com, Seller Hub, Social Connect, UpNest) signed by Andrea. In-flight thread continuity preserved via `template_used` field.
+**Signing convention:** Determined by `determine_signer()` using the `f/switchboard/email_signatures` Windmill variable. Commercial leads (Crexi/LoopNet) and BizBuySell leads signed by Larry. Residential leads (Realtor.com, Seller Hub, Social Connect, UpNest) signed by Andrea. In-flight thread continuity preserved via `template_used` field.
 
 **Response prompt frameworks branch by lead type:**
-- **Commercial:** CRE-specific language (OM, NDA, brochure, financials, market status)
+- **BizBuySell:** Business listing language (OM, NDA, brochure, financials, market status)
+- **Commercial** (Crexi, LoopNet): CRE-specific language (OM, NDA, brochure, financials, market status)
 - **Residential buyer:** Home-buying language (showings, similar homes, neighborhood info)
 - **Residential seller:** Home-selling language (CMA, commission, listing process, timeline)
 

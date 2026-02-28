@@ -1,7 +1,7 @@
 # Module D: Generate Drafts with Gmail Draft Creation
 # Uses Gmail API directly via OAuth to create drafts in teamgotcher@gmail.com
 #
-# Commercial templates (Crexi/LoopNet/BizBuySell) and Lead Magnet signed by Larry.
+# Commercial templates (Crexi/LoopNet), BizBuySell templates, and Lead Magnet signed by Larry.
 # Residential templates (Realtor.com, Seller Hub, Social Connect, UpNest) signed by Andrea.
 # Followup detection comes from Module A (WiseAgent notes), not Gmail sent folder.
 
@@ -209,7 +209,7 @@ def get_html_signature(source, template_used, sig_config):
     if not signers:
         # Hardcoded fallback when email_signatures config is missing
         src = source.lower()
-        if src in ("crexi", "loopnet", "bizbuysell") or template_used in ("lead_magnet", "commercial_first_outreach_template", "commercial_followup_template", "commercial_multi_property_first_contact", "commercial_multi_property_followup"):
+        if src in ("crexi", "loopnet", "bizbuysell") or template_used.startswith(("bizbuysell_", "commercial_")) or template_used == "lead_magnet":
             return "Talk soon,<br>Larry<br>(734) 732-3789"
         else:
             return "Talk soon,<br>Andrea<br>(734) 223-1015"
@@ -258,7 +258,7 @@ def main(grouped_data: dict):
         properties = lead.get("properties", [])
         has_lead_magnet = any(p.get("lead_magnet") for p in properties)
         non_magnet_props = [p for p in properties if not p.get("lead_magnet")]
-        is_commercial = source.lower() in ("crexi", "loopnet", "bizbuysell")
+        is_commercial = source.lower() in ("crexi", "loopnet")
         is_bizbuysell = source.lower() == "bizbuysell"
         is_residential_seller = source.lower() in ("seller hub", "social connect", "upnest")
 

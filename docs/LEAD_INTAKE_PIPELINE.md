@@ -270,14 +270,21 @@ The largest module. Selects an email template for each lead based on source type
 | 1 | `realtor_com` | — | Tour inquiry response | Andrea |
 | 2 | `upnest` | lead_type = buyer | Buyer introduction | Andrea |
 | 3 | `seller_hub` / `social_connect` / `upnest` (seller) | — | Seller outreach | Andrea |
-| 4 | Any | All properties are lead magnets | Lead magnet response (uses `response_override`) | Larry |
-| 5 | `crexi` / `loopnet` / `bizbuysell` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
-| 6 | `crexi` / `loopnet` / `bizbuysell` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
-| 7 | `crexi` / `loopnet` / `bizbuysell` | Single property, followup | `commercial_followup_template` | Larry |
-| 8 | `crexi` / `loopnet` / `bizbuysell` | Single property, first contact | `commercial_first_outreach_template` | Larry |
-| 9 | Unknown | — | Skip (no draft created) | — |
+| 4 | `bizbuysell` | Lead magnet | `bizbuysell_lead_magnet` | Larry |
+| 4 | `bizbuysell` | Multiple businesses, followup | `bizbuysell_multi_followup` | Larry |
+| 4 | `bizbuysell` | Multiple businesses, first contact | `bizbuysell_multi_first_contact` | Larry |
+| 4 | `bizbuysell` | Single business, followup | `bizbuysell_followup` | Larry |
+| 4 | `bizbuysell` | Single business, first contact | `bizbuysell_first_outreach` | Larry |
+| 5 | Any (non-BizBuySell) | All properties are lead magnets | `lead_magnet` | Larry |
+| 6 | `crexi` / `loopnet` | Multiple properties, followup | `commercial_multi_property_followup` | Larry |
+| 7 | `crexi` / `loopnet` | Multiple properties, first contact | `commercial_multi_property_first_contact` | Larry |
+| 8 | `crexi` / `loopnet` | Single property, followup | `commercial_followup_template` | Larry |
+| 9 | `crexi` / `loopnet` | Single property, first contact | `commercial_first_outreach_template` | Larry |
+| 10 | Unknown | — | Skip (no draft created) | — |
 
-**Commercial templates (Crexi/LoopNet/BizBuySell):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
+**BizBuySell templates:** All BizBuySell templates use "business" / "business listing" language instead of "property" and "off-market opportunities" instead of "off-market properties." Signed by Larry with phone (734) 732-3789. Each template has a matching SMS version.
+
+**Commercial templates (Crexi/LoopNet):** All commercial templates are signed by Larry with phone (734) 732-3789. No brochure highlights are included. Multi-property first contact uses inline property listing: "123 Main in Ann Arbor and 456 Oak in Ypsilanti" (Oxford comma for 3+). Each template has a matching SMS version.
 
 **Property display in templates:** `format_property_list_inline()` uses `property_address` when it has a real street address (3+ comma-delimited parts, e.g., "826 N Main St, Adrian, MI 49221" → "826 N Main St in Adrian"). For city-only addresses like "South Lyon, MI", it falls back to `canonical_name` from the property mapping.
 
