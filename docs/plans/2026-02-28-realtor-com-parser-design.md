@@ -48,7 +48,9 @@ Create `parse_realtor_com_lead()` in `gmail_pubsub_webhook.py` — a dedicated p
 | email | `Email Address:` | `Email Address:\s*(.+)` | Validate format, check EXCLUDED_EMAIL_ADDRESSES |
 | phone | `Phone Number:` | `Phone Number:\s*([\d\-\(\)\+\s\.]+)` | Strip whitespace |
 | property_address | `Property Address:` | Multi-line: collect non-empty lines after label until `MLSID` or blank line | Join street + city/state/zip with `, ` |
-| property_name | Derived | Same as property_address | |
+| property_name | Derived | Same as property_address | **Required** — `property_match` sets `canonical_name` from this; without it the template subject is empty |
+| lead_type | Hardcoded | `"buyer"` | All Realtor.com leads are buyer inquiries. Consistent with Social Connect/UpNest pattern |
+| notification_message_id | Passed in | `msg_id` | Required for dedup/group audit trail |
 
 ### Property address parsing detail
 
@@ -62,6 +64,26 @@ MLSID # 26003866          ← stop here
 
 Collect lines after `Property Address:` until hitting a line that starts with `MLSID`, is empty, or is another label. Join with `, `.
 
+### Null guard
+
+Following the pattern of all three existing dedicated parsers: `if not email and not name: return None`.
+
+### Output dict
+
+```python
+{
+    "name": "Rebecca Sutton",
+    "email": "kpfarms@yahoo.com",
+    "phone": "517-881-7829",
+    "source": "Realtor.com",
+    "source_type": "realtor_com",
+    "lead_type": "buyer",
+    "property_name": "15 Pinewood Dr, Grass Lake, MI 49240",
+    "property_address": "15 Pinewood Dr, Grass Lake, MI 49240",
+    "notification_message_id": "19ca20243e08730f"
+}
+```
+
 ### Routing change
 
 In `parse_lead_from_notification()` (line 769), add `realtor_com` to the dedicated parser block:
@@ -70,7 +92,7 @@ if category == "realtor_com":
     return parse_realtor_com_lead(service, msg_id, sender, subject)
 ```
 
-This removes Realtor.com from the generic parsing path entirely. The `realtor_com` branches in `parse_property_name` (line 523-527) and the property_address extraction (lines 809-813) become dead code for Realtor.com — they can be cleaned up.
+This removes Realtor.com from the generic parsing path entirely.
 
 ### Generic parser cleanup
 
@@ -78,6 +100,8 @@ Remove the now-dead `realtor_com` branches from:
 - `parse_property_name()` (line 523-527) — realtor_com subject extraction
 - `parse_lead_from_notification()` (lines 784-786) — realtor_com source/source_type assignment
 - `parse_lead_from_notification()` (lines 809-813) — realtor_com property_address from subject
+- Comment at line 777: remove "Realtor.com" from the generic parser description
+- Comment at line 802: remove "Realtor.com subject" from the property_address description
 
 ### Files to modify
 
@@ -91,9 +115,9 @@ Remove the now-dead `realtor_com` branches from:
 
 ### No template changes needed
 
-The Realtor.com template in `generate_drafts` (line 292-297) already uses `prop.get("property_address")` and `prop.get("canonical_name")` correctly. With a real address instead of a person's name, it will produce:
-- Subject: `"RE: Your Realtor.com inquiry in 15 Pinewood Dr in Grass Lake"` (via `get_city` which now correctly handles 4-part addresses)
-- Body: `"I received your Realtor.com inquiry about 15 Pinewood Dr, Grass Lake, MI 49240"`
+The Realtor.com template in `generate_drafts` (lines 292-297) uses `canonical` for the subject and `addr` for the body. With the parser providing `property_name`, the `property_match` module sets `canonical_name` from it, and the template produces:
+- Subject: `"RE: Your Realtor.com inquiry in 15 Pinewood Dr, Grass Lake, MI 49240"` (via `canonical_name`)
+- Body: `"I received your Realtor.com inquiry about 15 Pinewood Dr, Grass Lake, MI 49240"` (via `property_address`)
 
 ## Verification
 
@@ -101,5 +125,8 @@ Run the new parser against the actual Rebecca Sutton notification email (msg_id 
 - name = `"Rebecca Sutton"`
 - email = `"kpfarms@yahoo.com"`
 - phone = `"517-881-7829"`
+- property_name = `"15 Pinewood Dr, Grass Lake, MI 49240"`
 - property_address = `"15 Pinewood Dr, Grass Lake, MI 49240"`
 - source = `"Realtor.com"`, source_type = `"realtor_com"`
+- lead_type = `"buyer"`
+- notification_message_id = `"19ca20243e08730f"`
