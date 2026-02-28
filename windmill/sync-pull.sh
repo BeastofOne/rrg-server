@@ -6,6 +6,4 @@ nix-shell -p nodejs_22 --run "npx windmill-cli@latest sync pull \
   --base-url http://localhost:8000 \
   --workspace rrg \
   --token "${WINDMILL_TOKEN:?WINDMILL_TOKEN env var must be set}" \
-  --skip-variables --skip-secrets --skip-resources \
-  --include-schedules --include-triggers \
   --yes" 2>&1
