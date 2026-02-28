@@ -520,11 +520,6 @@ def parse_property_name(subject, body, category):
         m = re.search(r'favorited\s+(.+?)(?:\s+on|\s*$)', subject, re.IGNORECASE)
         if m:
             return m.group(1).strip()
-    elif category == "realtor_com":
-        # "New realtor.com lead: 123 Main St"
-        m = re.search(r'new realtor\.com lead[:\-\s]+(.+?)(?:\s*$)', subject, re.IGNORECASE)
-        if m:
-            return m.group(1).strip()
     elif category == "seller_hub":
         m = re.search(r'(?:property|address)\s*[:\-]\s*(.+?)(?:\n|$)', body, re.IGNORECASE)
         if m:
@@ -758,6 +753,82 @@ def parse_upnest_lead(service, msg_id, sender, subject):
     }
 
 
+def parse_realtor_com_lead(service, msg_id, sender, subject):
+    """Parse lead data from a Realtor.com notification email.
+
+    Format (plain text body with labeled fields):
+      First Name: Rebecca
+      Last Name: Sutton
+      Email Address: kpfarms@yahoo.com
+      Phone Number: 517-881-7829
+
+      Comment:
+      I would like to request a private tour of ...
+
+      Property Address:
+      15 Pinewood Dr
+      Grass Lake, MI 49240
+      MLSID # 26003866
+    """
+    msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+    body = get_body_from_payload(msg.get('payload', {}))
+
+    # First Name + Last Name
+    first_name = ""
+    last_name = ""
+    m = re.search(r'First Name:\s*(.+)', body)
+    if m:
+        first_name = m.group(1).strip()
+    m = re.search(r'Last Name:\s*(.+)', body)
+    if m:
+        last_name = m.group(1).strip()
+    name = (first_name + " " + last_name).strip()
+
+    # Email Address (validate format, check exclusions)
+    email = ""
+    m = re.search(r'Email Address:\s*([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', body)
+    if m:
+        candidate = m.group(1).strip()
+        if candidate.lower() not in EXCLUDED_EMAIL_ADDRESSES:
+            email = candidate
+
+    # Phone Number
+    phone = ""
+    m = re.search(r'Phone Number:\s*([\d\-\(\)\+\s\.]+)', body)
+    if m:
+        phone = m.group(1).strip()
+
+    # Property Address: multi-line, collect until MLSID or blank line
+    lines = body.split('\n')
+    in_address = False
+    addr_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith('property address'):
+            in_address = True
+            continue
+        if in_address:
+            if not stripped or stripped.upper().startswith('MLSID'):
+                break
+            addr_lines.append(stripped)
+    property_address = ", ".join(addr_lines) if addr_lines else ""
+
+    if not email and not name:
+        return None
+
+    return {
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "source": "Realtor.com",
+        "source_type": "realtor_com",
+        "lead_type": "buyer",
+        "property_name": property_address,
+        "property_address": property_address,
+        "notification_message_id": msg_id
+    }
+
+
 def parse_lead_from_notification(service, msg_id, sender, subject, category):
     """Fetch full message body and parse lead data from a notification email.
 
@@ -773,17 +844,16 @@ def parse_lead_from_notification(service, msg_id, sender, subject, category):
         return parse_social_connect_lead(service, msg_id, sender, subject)
     if category == "upnest":
         return parse_upnest_lead(service, msg_id, sender, subject)
+    if category == "realtor_com":
+        return parse_realtor_com_lead(service, msg_id, sender, subject)
 
-    # Generic parsing for label-based formats (Realtor.com, Seller Hub, BizBuySell, LoopNet)
+    # Generic parsing for label-based formats (Seller Hub, BizBuySell, LoopNet)
     msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
     body = get_body_from_payload(msg.get('payload', {}))
 
     if category == "loopnet":
         source = "LoopNet"
         source_type = "loopnet"
-    elif category == "realtor_com":
-        source = "Realtor.com"
-        source_type = "realtor_com"
     elif category == "seller_hub":
         source = "Seller Hub"
         source_type = "seller_hub"
@@ -799,18 +869,13 @@ def parse_lead_from_notification(service, msg_id, sender, subject, category):
     property_name = parse_property_name(subject, body, category)
 
     # Extract property_address for residential sources where property_name
-    # is actually a street address (Seller Hub body, Realtor.com subject)
+    # is actually a street address (Seller Hub body)
     property_address = ""
     if category == "seller_hub":
         # Seller Hub: "Property Address: 123 Main St, City, MI 48103"
         m = re.search(r'(?:property\s*address|address)\s*[:\-]\s*(.+?)(?:\n|$)', body, re.IGNORECASE)
         if m:
             property_address = m.group(1).strip()
-    elif category == "realtor_com":
-        # Realtor.com: property_name from subject is already an address
-        # e.g. "New realtor.com lead: 123 Main St, City, MI 48103"
-        if property_name:
-            property_address = property_name
 
     # Need at least an email or name to create a lead
     if not email and not name:
