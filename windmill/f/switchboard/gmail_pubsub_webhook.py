@@ -551,10 +551,17 @@ def parse_crexi_lead(service, msg_id, sender, subject):
     body = get_body_from_payload(msg.get('payload', {}))
 
     # Name from subject: "Glenn Oppenlander has downloaded..."
+    # Pre-clean subject: strip leading emojis/non-ASCII and title prefixes
+    # e.g. "✅ Principal Mario Aljarbo opened flyer on..." → "Mario Aljarbo opened flyer on..."
+    clean_subject = re.sub(r'^[^\x00-\x7F]+\s*', '', subject)
+    clean_subject = re.sub(
+        r'^(?:Principal|Agent|Broker|Associate|Director|Manager|VP|CEO|CFO|President|Owner)\s+',
+        '', clean_subject
+    )
     name = ""
     m = re.match(
         r"([A-Z][a-zA-Z'\-]+(?:\s+[A-Z][a-zA-Z'\-]+){1,3})\s+(?:has\s+)?(?:opened|Executed|requesting|downloaded|favorited|clicked|is\s+requesting)",
-        subject
+        clean_subject
     )
     if m:
         name = m.group(1).strip()
