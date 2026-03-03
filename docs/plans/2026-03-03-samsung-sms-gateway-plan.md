@@ -582,23 +582,23 @@ SSH into rrg-server:
 ssh andrea@rrg-server
 ```
 
-Create a temporary monitoring script:
+Create a monitoring script (using `~/` instead of `/tmp/` so it survives reboots):
 ```bash
-cat > /tmp/check-samsung-gateway.sh << 'EOF'
+cat > ~/check-samsung-gateway.sh << 'EOF'
 #!/bin/bash
 RESULT=$(curl -sf --max-time 5 http://192.168.1.250:8686/health)
 if [ $? -ne 0 ]; then
-    echo "$(date): Samsung gateway UNREACHABLE" >> /tmp/samsung-gateway-monitor.log
+    echo "$(date): Samsung gateway UNREACHABLE" >> ~/samsung-gateway-monitor.log
 else
-    echo "$(date): OK - $RESULT" >> /tmp/samsung-gateway-monitor.log
+    echo "$(date): OK - $RESULT" >> ~/samsung-gateway-monitor.log
 fi
 EOF
-chmod +x /tmp/check-samsung-gateway.sh
+chmod +x ~/check-samsung-gateway.sh
 ```
 
 Add a temporary cron (every 5 minutes):
 ```bash
-(crontab -l 2>/dev/null; echo "*/5 * * * * /tmp/check-samsung-gateway.sh") | crontab -
+(crontab -l 2>/dev/null; echo "*/5 * * * * /home/andrea/check-samsung-gateway.sh") | crontab -
 ```
 
 **Step 2: Wait 24 hours**
@@ -606,8 +606,8 @@ Add a temporary cron (every 5 minutes):
 **Step 3: Check results**
 
 ```bash
-ssh andrea@rrg-server "cat /tmp/samsung-gateway-monitor.log | grep -c UNREACHABLE"
-ssh andrea@rrg-server "cat /tmp/samsung-gateway-monitor.log | wc -l"
+ssh andrea@rrg-server "cat ~/samsung-gateway-monitor.log | grep -c UNREACHABLE"
+ssh andrea@rrg-server "cat ~/samsung-gateway-monitor.log | wc -l"
 ```
 
 Expected: 0 unreachable entries out of ~288 checks.
@@ -620,11 +620,11 @@ ssh andrea@rrg-server "curl -sf -X POST http://192.168.1.250:8686/send-sms -H 'C
 
 Expected: SMS received.
 
-**Step 5: Clean up temp monitoring cron**
+**Step 5: Clean up monitoring cron and files**
 
 ```bash
 ssh andrea@rrg-server "crontab -l | grep -v check-samsung-gateway | crontab -"
-ssh andrea@rrg-server "rm /tmp/check-samsung-gateway.sh /tmp/samsung-gateway-monitor.log"
+ssh andrea@rrg-server "rm ~/check-samsung-gateway.sh ~/samsung-gateway-monitor.log"
 ```
 
 **GATE CHECK:** If >=95% uptime and SMS works after 24h → proceed to Phase 3.
@@ -699,8 +699,11 @@ Inside the `for draft in drafts:` loop (starting at line 180), add gateway selec
 Insert after line 182:
 ```python
             source_type = draft.get("source_type", "")
-            gateway_url = SMS_GATEWAY_RESIDENTIAL if source_type in RESIDENTIAL_SOURCES else SMS_GATEWAY_COMMERCIAL
+            is_residential = source_type in RESIDENTIAL_SOURCES
+            gateway_url = SMS_GATEWAY_RESIDENTIAL if is_residential else SMS_GATEWAY_COMMERCIAL
 ```
+
+**Note:** `source_type` is populated upstream by `generate_drafts_+_gmail.inline_script.py` (line 937) and flows through the draft dict. It is not currently accessed in this post-approval script, but is present in every draft.
 
 **Step 3: Replace `SMS_GATEWAY_URL` with `gateway_url` in the requests.post call**
 
@@ -718,7 +721,22 @@ To:
                     json={"phone": phone_e164, "message": sms_body},
 ```
 
-**Step 4: Sync to Windmill**
+**Step 4: Add gateway identifier to sms_results for debugging**
+
+In each `sms_results.append(...)` call within the loop, add a `"gateway"` field:
+
+```python
+# Success case (line ~204):
+sms_results.append({"email": draft.get("email"), "phone": phone_e164, "sms_sent": True, "gateway": "residential" if is_residential else "commercial"})
+
+# Failure case (line ~206):
+sms_results.append({"email": draft.get("email"), "phone": phone_e164, "sms_sent": False, "error": sms_data.get("error", "unknown"), "gateway": "residential" if is_residential else "commercial"})
+
+# Exception case (line ~208):
+sms_results.append({"email": draft.get("email"), "phone": phone_e164, "sms_sent": False, "error": str(e), "gateway": "residential" if is_residential else "commercial"})
+```
+
+**Step 5: Sync to Windmill**
 
 ```bash
 cd ~/rrg-server && wmill sync push --skip-variables --skip-secrets --skip-resources
@@ -726,7 +744,7 @@ cd ~/rrg-server && wmill sync push --skip-variables --skip-secrets --skip-resour
 
 Expected: Script pushes successfully.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add windmill/f/switchboard/lead_intake.flow/post_approval_\(crm_+_sms\).inline_script.py
@@ -734,7 +752,8 @@ git commit -m "feat: route residential lead SMS through Samsung tablet gateway
 
 Add per-draft gateway selection based on source_type. Commercial sources
 (crexi, loopnet, bizbuysell) use Pixel 9a. Residential sources (realtor_com,
-seller_hub, social_connect, upnest) use Samsung tablet.
+seller_hub, social_connect, upnest) use Samsung tablet. Log which gateway
+handled each SMS in sms_results for debugging.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
@@ -768,8 +787,11 @@ Inside the `for draft in drafts:` loop (starting at line 178), add after `phone 
 
 ```python
             source_type = draft.get("source_type", "")
-            gateway_url = SMS_GATEWAY_RESIDENTIAL if source_type in RESIDENTIAL_SOURCES else SMS_GATEWAY_COMMERCIAL
+            is_residential = source_type in RESIDENTIAL_SOURCES
+            gateway_url = SMS_GATEWAY_RESIDENTIAL if is_residential else SMS_GATEWAY_COMMERCIAL
 ```
+
+**Note:** `source_type` is populated upstream by `generate_response_draft.inline_script.py` (line 883) and flows through the draft dict.
 
 **Step 3: Replace `SMS_GATEWAY_URL` with `gateway_url` in the requests.post call**
 
@@ -787,13 +809,17 @@ To:
                     json={"phone": phone_e164, "message": sms_body},
 ```
 
-**Step 4: Sync to Windmill**
+**Step 4: Add gateway identifier to sms_results for debugging**
+
+In each `sms_results.append(...)` call, add `"gateway": "residential" if is_residential else "commercial"`.
+
+**Step 5: Sync to Windmill**
 
 ```bash
 cd ~/rrg-server && wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add windmill/f/switchboard/lead_conversation.flow/post_approval_\(crm_+_sms\).inline_script.py
@@ -893,19 +919,47 @@ def main():
     return results
 ```
 
-**Step 2: Sync to Windmill**
+**Step 2: Create the script YAML metadata**
+
+Create `windmill/f/switchboard/check_sms_gateway_health.script.yaml`:
+
+```yaml
+summary: SMS Gateway Health Check — monitors Pixel 9a (commercial) and Samsung Tab E (residential)
+description: Checks both SMS gateways every 15 minutes via /health endpoint.
+  Cross-alerting — if one is down, sends SMS alert to Jake via the other.
+lock: '!inline f/switchboard/check_sms_gateway_health.script.lock'
+kind: script
+schema: null
+tag: ''
+```
+
+**Step 3: Create the schedule YAML**
+
+Create `windmill/f/switchboard/sms_gateway_health_every_15m.schedule.yaml`:
+
+```yaml
+summary: SMS gateway health check (every 15 minutes)
+description: Checks both Pixel 9a (commercial) and Samsung Tab E (residential)
+  SMS gateways. Cross-alerts via the healthy gateway if one is down.
+args: {}
+cron_version: v2
+email: jacob@resourcerealtygroupmi.com
+enabled: true
+is_flow: false
+no_flow_overlap: false
+schedule: 0 */15 * * * *
+script_path: f/switchboard/check_sms_gateway_health
+timezone: America/New_York
+ws_error_handler_muted: false
+```
+
+**Step 4: Sync to Windmill**
 
 ```bash
 cd ~/rrg-server && wmill sync push --skip-variables --skip-secrets --skip-resources
 ```
 
-**Step 3: Create the schedule in Windmill**
-
-Via Windmill UI or API — create schedule `f/switchboard/sms_gateway_health_check`:
-- Script: `f/switchboard/check_sms_gateway_health`
-- Cron: `0 */15 * * * *` (every 15 minutes)
-
-**Step 4: Test manually**
+**Step 5: Test manually**
 
 Run the script once from Windmill UI. Expected output:
 ```json
@@ -915,14 +969,33 @@ Run the script once from Windmill UI. Expected output:
 }
 ```
 
-**Step 5: Commit**
+**Step 6: Verify schedule was created**
 
 ```bash
-git add windmill/f/switchboard/check_sms_gateway_health.py
+wmill schedule list | grep sms_gateway
+```
+
+Expected: Shows the `sms_gateway_health_every_15m` schedule, enabled, every 15 minutes.
+
+**Step 7: Sync pull to capture any server-generated metadata**
+
+```bash
+cd ~/rrg-server && wmill sync pull
+```
+
+This captures any additional metadata Windmill generates (lock files, etc.) so the repo stays in sync.
+
+**Step 8: Commit**
+
+```bash
+git add windmill/f/switchboard/check_sms_gateway_health.py \
+       windmill/f/switchboard/check_sms_gateway_health.script.yaml \
+       windmill/f/switchboard/sms_gateway_health_every_15m.schedule.yaml
 git commit -m "feat: add SMS gateway health check with cross-alerting
 
 Checks both Pixel 9a (commercial) and Samsung tablet (residential)
 gateways every 15 minutes. If one is down, alerts Jake via the other.
+Includes script.yaml and schedule.yaml for repo sync.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
