@@ -308,3 +308,67 @@ class TestEdgeCases:
         fails, and the case-insensitive fallback captures the lowercase word.
         With 'email' being a non-skip word, it returns 'email'."""
         assert parse_name_field("name:\nemail: test@test.com") == "email"
+
+
+# ===========================================================================
+# 6. Newline-bleed coverage for case-insensitive fallback (line 474 fix)
+# ===========================================================================
+
+class TestFallbackNewlineBleed:
+    """The [ \\t]+ fix was applied to BOTH regex patterns. These tests verify
+    the case-insensitive fallback (second regex) also stops at newlines."""
+
+    def test_lowercase_name_no_bleed_lf(self):
+        """Lowercase name should not bleed across \\n into next field."""
+        body = "name: jon c\ncontact email: lttc@gmail.com"
+        assert parse_name_field(body) == "jon c"
+
+    def test_lowercase_name_no_bleed_crlf(self):
+        """Lowercase name should not bleed across \\r\\n."""
+        body = "name: jon c\r\ncontact email: lttc@gmail.com"
+        assert parse_name_field(body) == "jon c"
+
+    def test_lowercase_bizbuysell_exact_pattern(self):
+        """BizBuySell-style body with lowercase name hitting fallback regex."""
+        body = "contact: jon c\r\n \n\r\n \r\ncontact email: lttc@gmail.com"
+        assert parse_name_field(body) == "jon c"
+
+    def test_lowercase_single_word_no_bleed(self):
+        """Single lowercase word should not grab next line's text."""
+        body = "name: maria\r\nemail: maria@test.com"
+        assert parse_name_field(body) == "maria"
+
+
+# ===========================================================================
+# 7. Word-separator edge cases ([ \t]+ only matches space and tab)
+# ===========================================================================
+
+class TestWordSeparatorEdgeCases:
+    """Verify that only spaces and tabs count as word separators,
+    and other whitespace characters do not."""
+
+    def test_multiple_spaces_between_words(self):
+        """Multiple spaces between name parts should still be captured."""
+        assert parse_name_field("Name: John   Smith") == "John   Smith"
+
+    def test_mixed_space_tab_between_words(self):
+        """Mixed space+tab between name parts should still be captured."""
+        assert parse_name_field("Name: John \tSmith") == "John \tSmith"
+
+    def test_vertical_tab_not_a_word_separator(self):
+        """Vertical tab (\\v) is matched by \\s but not by [ \\t].
+        The name should stop before the vertical tab."""
+        body = "Name: John\vSmith"
+        assert parse_name_field(body) == "John"
+
+    def test_form_feed_not_a_word_separator(self):
+        """Form feed (\\f) is matched by \\s but not by [ \\t].
+        The name should stop before the form feed."""
+        body = "Name: John\fSmith"
+        assert parse_name_field(body) == "John"
+
+    def test_single_name_followed_by_newline_then_capitalized_word(self):
+        """A single capitalized name should NOT pick up the next line's
+        capitalized text as part of the name."""
+        body = "Name: Madonna\nAddress: 123 Main St"
+        assert parse_name_field(body) == "Madonna"
