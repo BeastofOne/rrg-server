@@ -688,7 +688,7 @@ Change line 177 from:
 To:
 ```python
         SMS_GATEWAY_COMMERCIAL = wmill.get_variable("f/switchboard/sms_gateway_url")
-        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential")
+        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential") or SMS_GATEWAY_COMMERCIAL
         RESIDENTIAL_SOURCES = {"realtor_com", "seller_hub", "social_connect", "upnest"}
 ```
 
@@ -777,7 +777,7 @@ Change line 175 from:
 To:
 ```python
         SMS_GATEWAY_COMMERCIAL = wmill.get_variable("f/switchboard/sms_gateway_url")
-        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential")
+        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential") or SMS_GATEWAY_COMMERCIAL
         RESIDENTIAL_SOURCES = {"realtor_com", "seller_hub", "social_connect", "upnest"}
 ```
 
@@ -1115,3 +1115,66 @@ Trigger `f/switchboard/check_sms_gateway_health` manually in Windmill UI. Expect
 ```bash
 ssh andrea@rrg-server "crontab -l | grep -v check-samsung-gateway | crontab -"
 ```
+
+---
+
+## Appendix A: MacroDroid Fallback Plan
+
+If Termux fails at any Phase 1 gate check (signing key mismatch, SMS permissions, package repo issues), use MacroDroid instead. This is an abbreviated plan — the Windmill changes (Phase 3) and documentation (Phase 4) remain the same regardless of which gateway software runs on the tablet.
+
+### MacroDroid Setup
+
+**Step 1: Install MacroDroid**
+
+```bash
+# Download from APKMirror (supports Android 5+):
+# https://www.apkmirror.com/apk/arlosoft/macrodroid/
+adb install /tmp/macrodroid.apk
+```
+
+Grant SMS permission:
+```bash
+adb shell pm grant com.arlosoft.macrodroid android.permission.SEND_SMS
+```
+
+**Step 2: Create the SMS gateway macro**
+
+Open MacroDroid on the tablet and create a macro:
+
+- **Trigger:** Webhook (HTTP)
+  - Port: 8686
+  - Path: `/send-sms`
+  - Method: POST
+- **Action:** Send SMS
+  - Phone number: `{webhook_json_phone}` (extracted from POST body)
+  - Message: `{webhook_json_message}` (extracted from POST body)
+- **Constraint:** None
+
+**Step 3: Create the health check macro**
+
+- **Trigger:** Webhook (HTTP)
+  - Port: 8686
+  - Path: `/health`
+  - Method: GET
+- **Action:** HTTP Response
+  - Body: `{"status": "ok"}`
+
+**Note:** MacroDroid's webhook trigger may require the paid version (~$5). The free tier is limited to 5 macros, which is sufficient (we only need 2). MacroDroid's webhook response format may differ from Flask — test the exact JSON contract before proceeding to Phase 3.
+
+**Step 4: Verify from rrg-server**
+
+```bash
+curl -X POST http://192.168.1.250:8686/send-sms \
+  -H 'Content-Type: application/json' \
+  -d '{"phone": "+17348960518", "message": "MacroDroid test"}'
+```
+
+Expected: SMS received. If the response format differs from `{"success": true}`, adjust the Windmill post-approval scripts to handle MacroDroid's response format.
+
+**Step 5: Auto-start**
+
+MacroDroid has built-in "Run on boot" support — no Termux:Boot needed. Enable it in MacroDroid settings.
+
+**Step 6: Proceed to Phase 2 (Device Hardening)**
+
+All device hardening steps (Tasks 4-6) apply identically. Skip Task 7 (Termux boot script) — MacroDroid handles its own auto-start. Proceed to Task 8 (soak test), then Phase 3.
