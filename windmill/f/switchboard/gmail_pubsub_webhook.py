@@ -464,14 +464,14 @@ def parse_name_field(body, subject=""):
     """
     # "Name: John Doe" pattern (capitalized)
     m = re.search(
-        r'(?:name|contact|buyer|seller|lead)\s*[:\-]\s*([A-Z][a-zA-Z\'\-]+(?:\s+[A-Z][a-zA-Z\'\-]+){0,3})',
+        r'(?:name|contact|buyer|seller|lead)\s*[:\-]\s*([A-Z][a-zA-Z\'\-]+(?:[ \t]+[A-Z][a-zA-Z\'\-]+){0,3})',
         body
     )
     if m:
         return m.group(1).strip()
     # Case-insensitive fallback
     m = re.search(
-        r'(?:name|contact|buyer|seller|lead)\s*[:\-]\s*([a-zA-Z\'\-]+(?:\s+[a-zA-Z\'\-]+){0,3})',
+        r'(?:name|contact|buyer|seller|lead)\s*[:\-]\s*([a-zA-Z\'\-]+(?:[ \t]+[a-zA-Z\'\-]+){0,3})',
         body, re.IGNORECASE
     )
     if m:
