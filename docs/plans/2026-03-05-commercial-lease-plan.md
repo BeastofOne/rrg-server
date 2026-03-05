@@ -346,10 +346,17 @@ git commit -m "feat(lease): add SQLite draft store"
 
 This file handles all computed values: rent table generation, numbers-to-words, date math, and dollar formatting.
 
+**Key fixes from code review:**
+- `compute_lease_end_date` uses `calendar.monthrange` to handle month-end dates (no Feb 31 crash)
+- `_count_months` walks month-by-month inclusively (no day-based approximation)
+- CPI escalation: Year 1 shows actual numbers, Year 2+ shows "Per CPI Adjustment"
+- Option periods: loop `num_options` times, each chains from prior period end
+- Security deposit is user-provided (not computed from rent table)
+
 ```python
 """Computed fields for the commercial lease — rent table, date math, currency formatting."""
 
-import math
+import calendar
 from datetime import date, timedelta
 from typing import Optional
 from num2words import num2words
@@ -390,6 +397,35 @@ def format_date_short(d: date) -> str:
     return d.strftime("%m/%d/%y")
 
 
+def _safe_date(year: int, month: int, day: int) -> date:
+    """Create a date, clamping day to the max for that month.
+
+    Handles month-end dates safely (e.g., Jan 31 + 1 month = Feb 28).
+    """
+    while month > 12:
+        year += 1
+        month -= 12
+    max_day = calendar.monthrange(year, month)[1]
+    return date(year, month, min(day, max_day))
+
+
+def _count_months(start: date, end: date) -> int:
+    """Count months inclusively by walking from start month to end month.
+
+    March to June = 4 (March, April, May, June).
+    """
+    count = 0
+    current_year = start.year
+    current_month = start.month
+    while (current_year, current_month) <= (end.year, end.month):
+        count += 1
+        current_month += 1
+        if current_month > 12:
+            current_month = 1
+            current_year += 1
+    return count
+
+
 def compute_lease_end_date(commencement: date, years: int, months: int) -> date:
     """Compute lease end date from commencement + term.
 
@@ -398,11 +434,12 @@ def compute_lease_end_date(commencement: date, years: int, months: int) -> date:
     """
     end_year = commencement.year + years
     end_month = commencement.month + months
+    # Normalize month overflow
     while end_month > 12:
         end_year += 1
         end_month -= 12
-    # End date is one day before the anniversary
-    anniversary = date(end_year, end_month, commencement.day)
+    # Anniversary date (clamped to valid day for that month)
+    anniversary = _safe_date(end_year, end_month, commencement.day)
     return anniversary - timedelta(days=1)
 
 
@@ -416,6 +453,10 @@ def generate_rent_table(
     lease_end: date,
     has_free_rent: bool = False,
     free_rent_end: Optional[date] = None,
+    num_options: int = 0,
+    option_term_years: int = 0,
+    option_start_pct_above_trailing: float = 0.0,
+    option_escalation_rate: float = 0.0,
 ) -> list:
     """Generate the rent schedule table rows.
 
@@ -424,15 +465,21 @@ def generate_rent_table(
         {
             "term_start": date,
             "term_end": date,
-            "lease_rate": float or None (free rent),
+            "lease_rate": float or None,
             "monthly_rent": float or None,
             "term_rent": float or None,
             "is_free_rent": bool,
+            "is_cpi": bool,
+            "label": str or None,  # e.g., "Option 1 - Year 2"
         },
         ...
     ]
     """
     rows = []
+
+    # Validate free rent doesn't overlap with rent commencement
+    if has_free_rent and free_rent_end and free_rent_end >= rent_commencement:
+        raise ValueError("Free rent end date must be before rent commencement date")
 
     # Row 0: Free rent period (if applicable)
     if has_free_rent and free_rent_end:
@@ -443,99 +490,139 @@ def generate_rent_table(
             "monthly_rent": None,
             "term_rent": None,
             "is_free_rent": True,
+            "is_cpi": False,
+            "label": None,
         })
 
-    # Determine lease anniversary month/day (from lease_commencement)
+    # Build list of escalation dates (lease anniversaries)
     anniv_month = lease_commencement.month
     anniv_day = lease_commencement.day
-
-    # Build list of escalation dates (lease anniversaries)
     escalation_dates = []
     year = lease_commencement.year
     while True:
-        d = date(year, anniv_month, anniv_day)
+        d = _safe_date(year, anniv_month, anniv_day)
         if d > lease_end:
             break
         escalation_dates.append(d)
         year += 1
 
-    # Generate paid periods
+    # Generate initial term paid periods
     current_rate = base_rate_psf
     period_start = rent_commencement
+    is_first_paid = True
 
     for i, esc_date in enumerate(escalation_dates):
         if esc_date <= rent_commencement:
-            # This anniversary is before rent starts — apply escalation but skip period
             if i > 0 and escalation_type == "fixed_percentage":
                 current_rate = base_rate_psf * ((1 + escalation_rate) ** i)
                 current_rate = round(current_rate, 2)
             continue
 
-        # Period: period_start to day before this anniversary
         period_end = esc_date - timedelta(days=1)
         if period_end > lease_end:
             period_end = lease_end
 
         if period_start <= period_end:
-            monthly = round(current_rate * premises_sf / 12, 2)
-            months_in_period = _months_between(period_start, period_end)
-            term_rent = round(monthly * months_in_period, 2)
+            months_in_period = _count_months(period_start, period_end)
 
+            if escalation_type == "CPI" and not is_first_paid:
+                rows.append({
+                    "term_start": period_start,
+                    "term_end": period_end,
+                    "lease_rate": None,
+                    "monthly_rent": None,
+                    "term_rent": None,
+                    "is_free_rent": False,
+                    "is_cpi": True,
+                    "label": None,
+                })
+            else:
+                monthly = round(current_rate * premises_sf / 12, 2)
+                term_rent = round(monthly * months_in_period, 2)
+                rows.append({
+                    "term_start": period_start,
+                    "term_end": period_end,
+                    "lease_rate": current_rate,
+                    "monthly_rent": monthly,
+                    "term_rent": term_rent,
+                    "is_free_rent": False,
+                    "is_cpi": False,
+                    "label": None,
+                })
+
+            is_first_paid = False
+
+        if escalation_type == "fixed_percentage":
+            current_rate = round(current_rate * (1 + escalation_rate), 2)
+
+        period_start = esc_date
+
+    # Final period of initial term
+    if period_start <= lease_end:
+        months_in_period = _count_months(period_start, lease_end)
+        if escalation_type == "CPI" and not is_first_paid:
             rows.append({
                 "term_start": period_start,
-                "term_end": period_end,
+                "term_end": lease_end,
+                "lease_rate": None,
+                "monthly_rent": None,
+                "term_rent": None,
+                "is_free_rent": False,
+                "is_cpi": True,
+                "label": None,
+            })
+        else:
+            monthly = round(current_rate * premises_sf / 12, 2)
+            term_rent = round(monthly * months_in_period, 2)
+            rows.append({
+                "term_start": period_start,
+                "term_end": lease_end,
                 "lease_rate": current_rate,
                 "monthly_rent": monthly,
                 "term_rent": term_rent,
                 "is_free_rent": False,
+                "is_cpi": False,
+                "label": None,
             })
 
-        # Escalate rate for next period
-        if escalation_type == "fixed_percentage":
-            current_rate = round(current_rate * (1 + escalation_rate), 2)
-        elif escalation_type == "none":
-            pass  # Rate stays the same
+    # Option periods
+    trailing_rate = current_rate
+    option_period_end = lease_end
+    for opt_num in range(1, num_options + 1):
+        opt_start = option_period_end + timedelta(days=1)
+        opt_end = compute_lease_end_date(opt_start, option_term_years, 0)
+        opt_rate = round(trailing_rate * (1 + option_start_pct_above_trailing), 2)
 
-        period_start = esc_date
+        for opt_year in range(option_term_years):
+            year_start = _safe_date(opt_start.year + opt_year, opt_start.month, opt_start.day)
+            year_end_candidate = _safe_date(opt_start.year + opt_year + 1, opt_start.month, opt_start.day) - timedelta(days=1)
+            year_end = min(year_end_candidate, opt_end)
 
-    # Final period: last anniversary to lease_end
-    if period_start <= lease_end:
-        monthly = round(current_rate * premises_sf / 12, 2)
-        months_in_period = _months_between(period_start, lease_end)
-        term_rent = round(monthly * months_in_period, 2)
+            if year_start > opt_end:
+                break
 
-        rows.append({
-            "term_start": period_start,
-            "term_end": lease_end,
-            "lease_rate": current_rate,
-            "monthly_rent": monthly,
-            "term_rent": term_rent,
-            "is_free_rent": False,
-        })
+            months_in_period = _count_months(year_start, year_end)
+            monthly = round(opt_rate * premises_sf / 12, 2)
+            term_rent = round(monthly * months_in_period, 2)
+
+            rows.append({
+                "term_start": year_start,
+                "term_end": year_end,
+                "lease_rate": opt_rate,
+                "monthly_rent": monthly,
+                "term_rent": term_rent,
+                "is_free_rent": False,
+                "is_cpi": False,
+                "label": f"Option {opt_num} - Year {opt_year + 1}",
+            })
+
+            if option_escalation_rate > 0:
+                opt_rate = round(opt_rate * (1 + option_escalation_rate), 2)
+
+        trailing_rate = opt_rate
+        option_period_end = opt_end
 
     return rows
-
-
-def _months_between(start: date, end: date) -> float:
-    """Calculate months between two dates, handling partial months.
-
-    Uses 30-day month convention for partial months.
-    Full months counted by calendar, partial months by days/30.
-    """
-    if start.day == 1:
-        # Start is first of month — count full months to end
-        # End is last day of its month if it's the last day
-        full_months = (end.year - start.year) * 12 + (end.month - start.month)
-        # Check if end is the last day of its month
-        next_month_first = date(end.year + (1 if end.month == 12 else 0),
-                                (end.month % 12) + 1, 1)
-        if end == next_month_first - timedelta(days=1):
-            return full_months + 1
-        # Partial last month
-        return full_months + (end.day / 30)
-    # General case
-    total_days = (end - start).days + 1
-    return round(total_days / 30, 4)
 ```
 
 **Step 2: Verify rent table computation**

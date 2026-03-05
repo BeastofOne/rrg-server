@@ -62,12 +62,13 @@ The .docx lease template is the source of truth. It uses Jinja2 syntax inside Wo
 | `lease_commencement_date` | date | Obligations start |
 | `rent_commencement_date` | date | Payments start (may differ for build-out) |
 | `lease_end_date` | date | Computed from commencement + term |
-| `num_options` | int | 0 = no option section; conditional |
+| `num_options` | int | 0 = no option section; supports multiple (e.g., "two 5-year options") |
 | `option_term_years` | int | Per option period |
-| `option_start_date` | date | Computed |
-| `option_end_date` | date | Computed |
-| `option_rent_basis` | string | "market rate", fixed amount, etc. |
+| `option_start_pct_above_trailing` | float | Starting rate % above trailing year (e.g., 0.03 = 3%) |
+| `option_escalation_rate` | float | Annual escalation within option period (e.g., 0.03 = 3%) |
 | `option_notice_days` | int | Default 90 |
+
+**Option periods are computed:** Each option chains from the previous (initial term or prior option). Option rent starts at `option_start_pct_above_trailing` above the last year's rate, then escalates annually at `option_escalation_rate`. All option period rows appear on the rent table (labeled "Option 1 - Year 1", etc.).
 
 ### Rent (Section 3.0) — Computed Rent Table
 | Variable | Type | Notes |
@@ -89,23 +90,27 @@ The .docx lease template is the source of truth. It uses Jinja2 syntax inside Wo
 | `consecutive_late_threshold` | int | Default 3 |
 | `nsf_fee` | float | Default $40 |
 
-**Rent table is COMPUTED from:** `premises_size_sf`, `base_lease_rate_psf`, `rent_escalation_type`, `rent_escalation_rate`, `lease_commencement_date`, `rent_commencement_date`, `lease_end_date`, `has_free_rent`, `free_rent_end_date`.
+**Rent table is COMPUTED from:** `premises_size_sf`, `base_lease_rate_psf`, `rent_escalation_type`, `rent_escalation_rate`, `lease_commencement_date`, `rent_commencement_date`, `lease_end_date`, `has_free_rent`, `free_rent_end_date`, plus option variables when `num_options > 0`.
 
 **Table columns:** Term | Lease Rate | Monthly Rent | Term Rent
 **Row logic:**
 1. Free rent row (if applicable): commencement → free_rent_end, "Free Base Rent" spanning columns
 2. First paid period: rent_commencement → day before next lease anniversary (may be short)
 3. Full-year rows: each anniversary, rate escalates
-4. Final row: last anniversary → lease_end (may be short)
-5. Monthly Rent = rate × SF / 12; Term Rent = monthly × months in period
+4. Final row of initial term: last anniversary → lease_end (may be short)
+5. Option period rows (if any): labeled "Option N - Year M", starting rate = trailing year + `option_start_pct_above_trailing`, then `option_escalation_rate` annually
+6. Monthly Rent = rate × SF / 12; Term Rent = monthly × months in period
+7. **CPI escalation:** Year 1 shows actual numbers. Year 2+ rows show period dates but rate/monthly/term columns show "Per CPI Adjustment"
+
+**Month counting:** Count months inclusively by walking from start to end month. No day-based approximations.
+
+**Validation:** `free_rent_end_date` must be before `rent_commencement_date` (no overlap allowed).
 
 ### Security Deposit (Section 4.0)
 | Variable | Type | Notes |
 |----------|------|-------|
 | `has_security_deposit` | bool | Conditional — entire section reworded if false |
-| `security_deposit_total` | float | Computed or manual |
-| `first_month_prepay` | float | Often = first month's rent from rent table |
-| `security_deposit_amount` | float | = total - prepay |
+| `security_deposit_amount` | float | User-provided dollar amount (asked directly, not computed) |
 | `deposit_replenishment_days` | int | Default 10 |
 
 ### Use (Section 5.0)
@@ -224,13 +229,17 @@ entry → [route_entry] → list_drafts    → END
 
 ### Computed Fields
 These are calculated, never asked for:
-- `lease_end_date` = commencement + term
-- `option_start_date` = lease_end_date + 1 day
-- `option_end_date` = option_start + option_term
-- Rent table rows (all periods, rates, monthly/term amounts)
-- Security deposit amounts (from first month's rent)
+- `lease_end_date` = commencement + term (uses `calendar.monthrange` to handle month-end dates safely)
+- Option period dates: each chains from prior period end. Loop `num_options` times.
+- Rent table rows (initial term + all option periods, with escalation)
+- CPI rows: Year 1 actual, Year 2+ show "Per CPI Adjustment"
 - Numbers-to-words (e.g., 4433.33 → "Four Thousand Four Hundred Thirty-Three Dollars and 33/100")
 - Date formatting (e.g., "March 1, 2026")
+
+### Section 3.2 — Lease Type Conditionals
+- **NNN:** Full breakdown (CAM, taxes, insurance, etc.)
+- **Modified Gross:** Rewritten to only cover tenant-reimbursed items (utilities, specific expenses)
+- **Gross:** Section 3.2 removed entirely; 3.3/3.4 renumber to 3.2/3.3
 
 ## Container & Files
 ```
@@ -252,7 +261,7 @@ rrg-commercial-lease/
 
 - **Port:** 8102
 - **Docker volume:** `/data/lease_drafts.db`
-- **Nix deps:** python312, flask, langgraph, docxtpl, libreoffice (headless), claude-code
+- **Nix deps:** python312, flask, langgraph, docxtpl, libreoffice (headless via runCommand symlink layer — NOT in contents directly), claude-code
 
 ## Router Integration
 - New intent: `create_lease` → handler `"lease"`
