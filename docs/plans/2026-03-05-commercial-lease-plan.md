@@ -10,6 +10,21 @@
 
 **Design doc:** `docs/plans/2026-03-05-commercial-lease-design.md`
 
+### Review Fixes Applied (2026-03-05)
+- **C1:** LibreOffice + Claude Code use `runCommand` symlink layers in Nix (not `contents` directly) — prevents /bin masking
+- **C2:** `compute_lease_end_date` uses `calendar.monthrange` to handle month-end dates safely
+- **C3:** Month counting walks month-by-month inclusively (`_count_months`) — no day-based approximation
+- **C4:** Security deposit is user-provided (`security_deposit_amount`), not computed from rent table
+- **C5:** CPI escalation: Year 1 shows actual numbers, Year 2+ shows "Per CPI Adjustment"
+- **I1:** Multiple option periods supported — loop `num_options` times, each chains from prior
+- **I1+:** Option rent: `option_start_pct_above_trailing` + `option_escalation_rate` (e.g., "3% above trailing, 3% annual")
+- **I3:** Missing context vars added (rent_escalation_type/rate, has_rofr, rofr_description, option_periods list)
+- **I4:** Security deposit guarded — no computation when `has_security_deposit=False`
+- **I5:** Section 3.2 has three conditional branches (NNN/Modified Gross/Gross with renumbering)
+- **I7:** PDF label uses handler-based mapping instead of filename string matching
+- **I8:** Validation: `free_rent_end_date` must be before `rent_commencement_date`
+- **Minor:** `lease_date` overridable (not hardcoded to today), ROFR clause added to plan
+
 ---
 
 ### Task 1: Project Scaffold
@@ -631,9 +646,9 @@ def generate_rent_table(
 cd rrg-commercial-lease
 python3 -c "
 from datetime import date
-from lease_computed import generate_rent_table, dollars_to_words, format_currency
+from lease_computed import generate_rent_table, dollars_to_words, format_currency, _count_months
 
-# Match the example from the lease image: 1400 SF, \$19/SF, 3% escalation
+# Test 1: Match the example from the lease image: 1400 SF, \$19/SF, 3% escalation
 rows = generate_rent_table(
     premises_sf=1400,
     base_rate_psf=19.00,
@@ -645,28 +660,84 @@ rows = generate_rent_table(
     has_free_rent=True,
     free_rent_end=date(2026, 1, 1),
 )
+print('=== Initial Term ===')
 for r in rows:
     if r['is_free_rent']:
         print(f\"{r['term_start']} – {r['term_end']}: Free Base Rent\")
     else:
-        print(f\"{r['term_start']} – {r['term_end']}: \${r['lease_rate']}/SF, {format_currency(r['monthly_rent'])}/mo, {format_currency(r['term_rent'])} term\")
+        label = f\" ({r['label']})\" if r.get('label') else ''
+        print(f\"{r['term_start']} – {r['term_end']}: \${r['lease_rate']}/SF, {format_currency(r['monthly_rent'])}/mo, {format_currency(r['term_rent'])} term{label}\")
 
+# Test 2: With two 5-year options, 3% above trailing, 3% annual escalation
+print()
+print('=== With Options ===')
+rows2 = generate_rent_table(
+    premises_sf=1400,
+    base_rate_psf=19.00,
+    escalation_type='fixed_percentage',
+    escalation_rate=0.03,
+    lease_commencement=date(2025, 12, 1),
+    rent_commencement=date(2026, 2, 1),
+    lease_end=date(2030, 1, 31),
+    has_free_rent=True,
+    free_rent_end=date(2026, 1, 1),
+    num_options=2,
+    option_term_years=5,
+    option_start_pct_above_trailing=0.03,
+    option_escalation_rate=0.03,
+)
+for r in rows2:
+    if r['is_free_rent']:
+        print(f\"{r['term_start']} – {r['term_end']}: Free Base Rent\")
+    elif r.get('is_cpi'):
+        print(f\"{r['term_start']} – {r['term_end']}: Per CPI Adjustment\")
+    else:
+        label = f\" ({r['label']})\" if r.get('label') else ''
+        print(f\"{r['term_start']} – {r['term_end']}: \${r['lease_rate']}/SF, {format_currency(r['monthly_rent'])}/mo, {format_currency(r['term_rent'])} term{label}\")
+
+# Test 3: CPI escalation
+print()
+print('=== CPI Escalation ===')
+rows3 = generate_rent_table(
+    premises_sf=1400,
+    base_rate_psf=19.00,
+    escalation_type='CPI',
+    escalation_rate=0,
+    lease_commencement=date(2026, 1, 1),
+    rent_commencement=date(2026, 1, 1),
+    lease_end=date(2028, 12, 31),
+)
+for r in rows3:
+    if r.get('is_cpi'):
+        print(f\"{r['term_start']} – {r['term_end']}: Per CPI Adjustment\")
+    else:
+        print(f\"{r['term_start']} – {r['term_end']}: \${r['lease_rate']}/SF, {format_currency(r['monthly_rent'])}/mo\")
+
+# Test 4: Month counting
+print()
+print('=== Month Counting ===')
+print(f\"March-June: {_count_months(date(2026,3,1), date(2026,6,30))} (expect 4)\")
+print(f\"Jan-Dec: {_count_months(date(2026,1,1), date(2026,12,31))} (expect 12)\")
+
+# Test 5: dollars_to_words
 print()
 print(dollars_to_words(4433.33))
 print(dollars_to_words(2216.67))
 "
 ```
 
-Expected output should closely match the rent table image:
+Expected output:
 - Free rent row: 2025-12-01 – 2026-01-01
 - $19.00/SF → $2,216.67/mo
 - $19.57/SF → $2,283.17/mo (3% escalation)
-- Continuing through $21.38/SF
-- dollars_to_words should produce "Four Thousand Four Hundred Thirty-Three Dollars and 33/100"
+- Option rows labeled "Option 1 - Year 1", etc.
+- CPI rows show "Per CPI Adjustment" for Year 2+
+- Month counting: March-June = 4, Jan-Dec = 12
+- dollars_to_words: "Four Thousand Four Hundred Thirty-Three Dollars and 33/100"
 
 **Step 3: Iterate on rent table if numbers don't match the image exactly**
 
-The rent table computation is the most critical piece — the numbers MUST match the image. Debug any discrepancies in `_months_between` or the escalation date logic.
+The rent table computation is the most critical piece — the numbers MUST match the image. Debug any discrepancies in `_count_months` or the escalation date logic.
 
 **Step 4: Commit**
 
@@ -743,7 +814,8 @@ OPTIONAL_VARIABLES = {
     "lease_term_months": "Lease term (additional months)",
     "num_options": "Number of option periods",
     "option_term_years": "Option term (years)",
-    "option_rent_basis": "Option rent basis",
+    "option_start_pct_above_trailing": "Option starting rate % above trailing year",
+    "option_escalation_rate": "Option annual escalation rate (%)",
     "option_notice_days": "Option notice period (days)",
     # Rent
     "rent_escalation_type": "Rent escalation type",
@@ -758,7 +830,7 @@ OPTIONAL_VARIABLES = {
     "nsf_fee": "NSF fee ($)",
     # Security deposit
     "has_security_deposit": "Security deposit?",
-    "security_deposit_total": "Security deposit total ($)",
+    "security_deposit_amount": "Security deposit amount ($)",
     # Tenant responsibilities
     "hvac_repair_threshold": "HVAC repair threshold ($/yr)",
     # Taxes
@@ -776,6 +848,8 @@ OPTIONAL_VARIABLES = {
     "has_cam_cap": "CAM cap?",
     "cam_cap_pct": "CAM cap (%)",
     "has_early_termination": "Early termination clause?",
+    "has_rofr": "Right of first refusal?",
+    "rofr_description": "ROFR scope description",
     "has_exclusive_use": "Exclusive use clause?",
     "exclusive_use_description": "Exclusive use description",
     "delivery_condition": "Delivery condition",
@@ -828,9 +902,14 @@ Available variables and their types:
 - permitted_use (string): What the space can be used for
 - num_options (integer): Number of renewal options
 - option_term_years (integer): Years per option
-- option_rent_basis (string): How option rent is determined
+- option_start_pct_above_trailing (number): Starting rate % above trailing year as decimal (e.g. 0.03 for 3%)
+- option_escalation_rate (number): Annual escalation within option as decimal (e.g. 0.03 for 3%)
+- option_notice_days (integer): Days notice required for option exercise
 - has_security_deposit (boolean)
-- security_deposit_total (number)
+- security_deposit_amount (number): Dollar amount of security deposit (user-provided, not computed)
+- lease_date (string, YYYY-MM-DD): Date on the lease document (defaults to today if not specified)
+- has_rofr (boolean): Right of first refusal clause
+- rofr_description (string): Scope of ROFR
 - has_personal_guaranty (boolean)
 - guarantor_name (string)
 - tenant_signer_name (string)
@@ -1003,7 +1082,7 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
     if lease_commencement:
         lease_end = compute_lease_end_date(lease_commencement, lease_term_years, lease_term_months)
 
-    # Rent table
+    # Rent table (includes option periods if any)
     rent_rows = []
     if all([v.get("premises_size_sf"), v.get("base_lease_rate_psf"), lease_commencement, rent_commencement, lease_end]):
         rent_rows = generate_rent_table(
@@ -1016,6 +1095,10 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
             lease_end=lease_end,
             has_free_rent=bool(v.get("has_free_rent")),
             free_rent_end=_parse_date(v.get("free_rent_end_date")),
+            num_options=int(v.get("num_options", 0)),
+            option_term_years=int(v.get("option_term_years", 0)),
+            option_start_pct_above_trailing=float(v.get("option_start_pct_above_trailing", 0)),
+            option_escalation_rate=float(v.get("option_escalation_rate", 0)),
         )
 
     # Format rent rows for template
@@ -1028,6 +1111,18 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
                 "monthly_rent": "Free Base Rent",
                 "term_rent": "",
                 "is_free_rent": True,
+                "is_cpi": False,
+                "label": row.get("label", ""),
+            })
+        elif row.get("is_cpi"):
+            formatted_rows.append({
+                "term": f"{format_date_short(row['term_start'])} – {format_date_short(row['term_end'])}",
+                "lease_rate": "Per CPI Adjustment",
+                "monthly_rent": "Per CPI Adjustment",
+                "term_rent": "Per CPI Adjustment",
+                "is_free_rent": False,
+                "is_cpi": True,
+                "label": row.get("label", ""),
             })
         else:
             formatted_rows.append({
@@ -1036,29 +1131,38 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
                 "monthly_rent": format_currency(row["monthly_rent"]),
                 "term_rent": format_currency(row["term_rent"]),
                 "is_free_rent": False,
+                "is_cpi": False,
+                "label": row.get("label", ""),
             })
 
-    # Security deposit computation
-    first_month_rent = rent_rows[1]["monthly_rent"] if len(rent_rows) > 1 else 0
-    deposit_total = float(v.get("security_deposit_total", first_month_rent * 2))
-    first_month_prepay = first_month_rent
-    deposit_amount = deposit_total - first_month_prepay
+    # Security deposit — user-provided, not computed
+    has_security_deposit = bool(v.get("has_security_deposit", True))
+    deposit_amount = float(v.get("security_deposit_amount", 0)) if has_security_deposit else 0
 
-    # Option periods
+    # Option periods — computed per-option, chained from initial term
     num_options = int(v.get("num_options", 0))
-    option_start = None
-    option_end = None
+    option_periods = []
     if num_options > 0 and lease_end:
-        option_start = lease_end + __import__("datetime").timedelta(days=1)
+        option_period_end = lease_end
         option_years = int(v.get("option_term_years", 5))
-        option_end = compute_lease_end_date(option_start, option_years, 0)
+        for opt_num in range(1, num_options + 1):
+            opt_start = option_period_end + timedelta(days=1)
+            opt_end = compute_lease_end_date(opt_start, option_years, 0)
+            option_periods.append({
+                "number": opt_num,
+                "start": opt_start,
+                "end": opt_end,
+                "start_formatted": format_date_legal(opt_start),
+                "end_formatted": format_date_legal(opt_end),
+            })
+            option_period_end = opt_end
 
     context = {
         # Preview mode flag
         "preview": preview,
 
-        # Lease date
-        "lease_date": format_date_legal(date.today()),
+        # Lease date (user-overridable, defaults to today)
+        "lease_date": format_date_legal(_parse_date(v.get("lease_date")) or date.today()),
 
         # Parties
         "landlord_name": get("landlord_name", label="LANDLORD NAME"),
@@ -1091,11 +1195,11 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
         # Options
         "num_options": num_options,
         "num_options_words": number_to_words(num_options) if num_options else "zero",
-        "option_term_years": int(v.get("option_term_years", 5)),
-        "option_term_years_words": number_to_words(int(v.get("option_term_years", 5))),
-        "option_start_date": format_date_legal(option_start) if option_start else "",
-        "option_end_date": format_date_legal(option_end) if option_end else "",
-        "option_rent_basis": get("option_rent_basis", "market rate"),
+        "option_term_years": int(v.get("option_term_years", 0)),
+        "option_term_years_words": number_to_words(int(v.get("option_term_years", 0))) if v.get("option_term_years") else "",
+        "option_periods": option_periods,  # List of {number, start, end, start_formatted, end_formatted}
+        "option_start_pct_above_trailing": float(v.get("option_start_pct_above_trailing", 0)),
+        "option_escalation_rate": float(v.get("option_escalation_rate", 0)),
         "option_notice_days": int(v.get("option_notice_days", 90)),
 
         # Rent table
@@ -1117,17 +1221,11 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
         "consecutive_late_threshold": int(v.get("consecutive_late_threshold", 3)),
         "nsf_fee": float(v.get("nsf_fee", 40)),
 
-        # Security deposit
-        "has_security_deposit": v.get("has_security_deposit", True),
-        "security_deposit_total": deposit_total,
-        "security_deposit_total_words": dollars_to_words(deposit_total),
-        "security_deposit_total_formatted": format_currency(deposit_total),
-        "first_month_prepay": first_month_prepay,
-        "first_month_prepay_words": dollars_to_words(first_month_prepay),
-        "first_month_prepay_formatted": format_currency(first_month_prepay),
+        # Security deposit — user-provided amount
+        "has_security_deposit": has_security_deposit,
         "security_deposit_amount": deposit_amount,
-        "security_deposit_amount_words": dollars_to_words(deposit_amount),
-        "security_deposit_amount_formatted": format_currency(deposit_amount),
+        "security_deposit_amount_words": dollars_to_words(deposit_amount) if deposit_amount > 0 else "",
+        "security_deposit_amount_formatted": format_currency(deposit_amount) if deposit_amount > 0 else "",
         "deposit_replenishment_days": int(v.get("deposit_replenishment_days", 10)),
 
         # Use
@@ -1191,9 +1289,15 @@ def _build_template_context(variables: dict, preview: bool = False) -> dict:
         "has_cam_cap": bool(v.get("has_cam_cap")),
         "cam_cap_pct": float(v.get("cam_cap_pct", 0)),
         "has_early_termination": bool(v.get("has_early_termination")),
+        "has_rofr": bool(v.get("has_rofr")),
+        "rofr_description": get("rofr_description", ""),
         "has_exclusive_use": bool(v.get("has_exclusive_use")),
         "exclusive_use_description": get("exclusive_use_description", ""),
         "delivery_condition": get("delivery_condition", "as-is"),
+
+        # Rent escalation details for template
+        "rent_escalation_type": v.get("rent_escalation_type", "none"),
+        "rent_escalation_rate": float(v.get("rent_escalation_rate", 0)),
     }
 
     return context
@@ -1734,11 +1838,9 @@ git commit -m "feat(lease): add LangGraph workflow with all nodes"
 
 **Step 1: Write flake.nix**
 
-Model after `rrg-pnl/flake.nix` but replace WeasyPrint deps with LibreOffice + docxtpl. Key differences:
-- LibreOffice headless instead of WeasyPrint
-- No WeasyPrint system deps (pango, cairo, etc.)
-- SQLite volume mount (handled in docker-compose, not flake)
-- `num2words` and `docxtpl` in poetry deps
+Model after `rrg-pnl/flake.nix` but replace WeasyPrint deps with LibreOffice + docxtpl.
+
+**CRITICAL: LibreOffice and Claude Code must NOT go directly in `contents`** — they create root-level /bin, /lib symlinks that mask other packages. Use `runCommand` derivations to symlink their binaries to `/usr/local/bin/`, same pattern as the windmill-worker Claude CLI layer.
 
 ```nix
 {
@@ -1790,6 +1892,20 @@ Model after `rrg-pnl/flake.nix` but replace WeasyPrint deps with LibreOffice + d
         ];
       };
 
+      # CRITICAL: Symlink layers — DO NOT put these packages in contents directly
+      # Putting large packages (libreoffice, claude-code) in contents creates
+      # root-level /bin, /lib symlinks that mask other packages' files.
+      claudeLayer = linuxPkgs.runCommand "claude-layer" {} ''
+        mkdir -p $out/usr/local/bin
+        ln -s ${linuxPkgs.claude-code}/bin/claude $out/usr/local/bin/claude
+      '';
+
+      libreofficeLayer = linuxPkgs.runCommand "libreoffice-layer" {} ''
+        mkdir -p $out/usr/local/bin
+        ln -s ${linuxPkgs.libreoffice}/bin/libreoffice $out/usr/local/bin/libreoffice
+        ln -s ${linuxPkgs.libreoffice}/bin/soffice $out/usr/local/bin/soffice
+      '';
+
     in
     {
       packages.x86_64-linux.dockerImage = linuxPkgs.dockerTools.buildLayeredImage {
@@ -1798,8 +1914,8 @@ Model after `rrg-pnl/flake.nix` but replace WeasyPrint deps with LibreOffice + d
 
         contents = [
           pythonEnv
-          linuxPkgs.claude-code
-          linuxPkgs.libreoffice
+          claudeLayer        # Symlink only — NOT linuxPkgs.claude-code
+          libreofficeLayer   # Symlink only — NOT linuxPkgs.libreoffice
           linuxPkgs.coreutils
           linuxPkgs.bashInteractive
           linuxPkgs.cacert
@@ -1820,6 +1936,7 @@ Model after `rrg-pnl/flake.nix` but replace WeasyPrint deps with LibreOffice + d
             "NIX_SSL_CERT_FILE=${linuxPkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             "FONTCONFIG_FILE=${fontConfig}"
             "PYTHONPATH=/app"
+            "PATH=/usr/local/bin:${pythonEnv}/bin:/bin"
           ];
         };
       };
@@ -1904,7 +2021,10 @@ Key transformations (section by section — see design doc for full variable inv
 **Preamble:** Replace party names, addresses, LLC language with Jinja2 tags.
 **Section 1.0:** Replace county, state, address, SF.
 **Section 2.0:** Replace all term/option values; add conditionals for zero months, zero options, multiple options.
-**Section 3.0:** Replace rent schedule table with `{% tr for row in rent_rows %}` loop; replace all dollar amounts and percentages; add lease_type conditionals for 3.2.
+**Section 3.0:** Replace rent schedule table with `{% tr for row in rent_rows %}` loop; replace all dollar amounts and percentages. **Section 3.2 has THREE conditional branches:**
+  - **NNN:** Full breakdown (CAM, taxes, insurance)
+  - **Modified Gross:** Rewritten to only cover tenant-reimbursed items (utilities, specific expenses)
+  - **Gross:** Section 3.2 removed entirely; 3.3/3.4 renumber to 3.2/3.3
 **Section 4.0:** Replace deposit amounts; add conditional for no-deposit.
 **Section 5.0:** Replace permitted use.
 **Sections 6-33:** Replace remaining hard-coded values per design doc.
@@ -1984,18 +2104,18 @@ Add to `INTENTS`:
 
 **Step 2: Add Lease PDF label in router app.py**
 
-Update the PDF label logic around line 166:
+Replace the fragile filename-based PDF label logic with handler-based mapping:
 
 ```python
-if "Brochure" in fname:
-    pdf_label = "Download Brochure PDF"
-elif "Lease" in fname:
-    pdf_label = "Download Lease PDF"
-else:
-    pdf_label = "Download P&L PDF"
+PDF_LABELS = {
+    "pnl": "Download P&L PDF",
+    "brochure": "Download Brochure PDF",
+    "lease": "Download Lease PDF",
+}
+# Use: pdf_label = PDF_LABELS.get(current_handler, "Download PDF")
 ```
 
-Same pattern for the label around line 189.
+Apply this mapping wherever the PDF download button label is set (around lines 166 and 189).
 
 **Step 3: Add lease service to docker-compose.yml**
 
