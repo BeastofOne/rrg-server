@@ -15,7 +15,7 @@ class RouterState(TypedDict, total=False):
 
     # Set by route node
     route_type: str  # "handler" | "chat" | "error"
-    handler_name: Optional[str]  # "pnl" | "brochure"
+    handler_name: Optional[str]  # "pnl" | "brochure" | "commercial_pa"
 
     # Set by chat_response node (when route_type == "chat")
     response: str

@@ -163,18 +163,16 @@ with chat_tab:
             # Display response
             st.markdown(response_data["response"])
 
-            # Handle PDF output
-            if response_data.get("pdf_bytes"):
-                fname = response_data.get("pdf_filename", "output.pdf")
-                if "Brochure" in fname:
-                    pdf_label = "Download Brochure PDF"
-                else:
-                    pdf_label = "Download P&L PDF"
+            # Handle file output (PDF or DOCX)
+            file_bytes = response_data.get("pdf_bytes") or response_data.get("docx_bytes")
+            file_name = response_data.get("pdf_filename") or response_data.get("docx_filename") or "output"
+            if file_bytes:
+                mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_name.endswith(".docx") else "application/pdf"
                 st.download_button(
-                    label=pdf_label,
-                    data=response_data["pdf_bytes"],
-                    file_name=fname,
-                    mime="application/pdf",
+                    label="Download Preview",
+                    data=file_bytes,
+                    file_name=file_name,
+                    mime=mime,
                 )
 
         # Update session state from worker response
@@ -188,11 +186,11 @@ with chat_tab:
         # Save assistant message to history
         msg_entry = {"role": "assistant", "content": response_data["response"]}
         if response_data.get("pdf_bytes"):
-            fname = response_data.get("pdf_filename", "output.pdf")
-            pdf_label = "Download Brochure PDF" if "Brochure" in fname else "Download P&L PDF"
             msg_entry["pdf_bytes"] = response_data["pdf_bytes"]
-            msg_entry["pdf_filename"] = fname
-            msg_entry["pdf_label"] = pdf_label
+            msg_entry["pdf_filename"] = response_data.get("pdf_filename", "output.pdf")
+        if response_data.get("docx_bytes"):
+            msg_entry["docx_bytes"] = response_data["docx_bytes"]
+            msg_entry["docx_filename"] = response_data.get("docx_filename", "output.docx")
         st.session_state.messages.append(msg_entry)
 
 
