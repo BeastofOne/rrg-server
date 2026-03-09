@@ -228,19 +228,26 @@ with signals_tab:
                     with col_actions:
                         actions = sig.get("actions") or []
                         for act in actions:
-                            btn_key = f"sig_{sig['id']}_{act['action']}"
-                            if st.button(act["label"], key=btn_key):
+                            # actions can be strings or dicts
+                            if isinstance(act, str):
+                                act_action = act.lower().replace(" ", "_")
+                                act_label = act
+                            else:
+                                act_action = act["action"]
+                                act_label = act["label"]
+                            btn_key = f"sig_{sig['id']}_{act_action}"
+                            if st.button(act_label, key=btn_key):
                                 # Mark signal as acted
                                 result = signal_client.act_on_signal(
-                                    sig["id"], act["action"]
+                                    sig["id"], act_action
                                 )
                                 # Resume suspended flow if URL present
                                 if sig.get("resume_url"):
                                     signal_client.resume_flow(
                                         sig["resume_url"],
-                                        {"action": act["action"]},
+                                        {"action": act_action},
                                     )
-                                st.success(f"Done: {act['label']}")
+                                st.success(f"Done: {act_label}")
                                 st.rerun()
 
                         if not actions:
