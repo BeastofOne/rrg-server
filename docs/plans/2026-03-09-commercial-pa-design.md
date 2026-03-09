@@ -349,7 +349,16 @@ Add `WORKER_PA_URL=http://rrg-commercial-pa:8102` to rrg-router's environment.
 - **Date formatting:** Use `f"{d.day}"` instead of `strftime("%-d")` for cross-platform safety (%-d is Linux-only, breaks on macOS dev)
 - **claude_llm.py:** Fourth copy (pnl, brochure, router, pa). Matches existing pattern. Tech debt noted.
 - **Flask dev server:** Single-threaded `app.run()` — SQLite concurrency is not an issue
-- **Draft store:** All read-merge-write operations in a single connection/transaction
+- **Draft store:** All read-merge-write operations must use a single SQLite connection and transaction. Example pattern for `update_draft`:
+  ```python
+  conn = sqlite3.connect(DB_PATH)
+  row = conn.execute("SELECT variables FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+  merged = {**json.loads(row[0]), **new_values}
+  conn.execute("UPDATE drafts SET variables = ? WHERE id = ?", (json.dumps(merged), draft_id))
+  conn.commit()
+  conn.close()
+  ```
+  Never open a separate connection for the read — do it all in one.
 
 ---
 
