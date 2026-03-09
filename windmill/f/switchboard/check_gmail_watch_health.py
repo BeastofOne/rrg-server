@@ -14,9 +14,12 @@
 #extra_requirements:
 #requests
 
+import os
 import wmill
 import requests
 from datetime import datetime, timezone, timedelta
+
+WM_API_BASE = os.environ.get('BASE_INTERNAL_URL', 'http://localhost:8000')
 
 
 def main():
@@ -28,7 +31,7 @@ def main():
     # Check recent jobs for gmail_pubsub_webhook
     try:
         resp = requests.get(
-            "http://localhost:8000/api/w/rrg/jobs/list",
+            f"{WM_API_BASE}/api/w/rrg/jobs/list",
             params={
                 "script_path_exact": "f/switchboard/gmail_pubsub_webhook",
                 "per_page": "1",
