@@ -64,6 +64,34 @@ value:
             expr: flow_input.target_node === 'brochure'
             parallel: true
             skip_failure: true
+          - summary: Commercial PA Worker
+            modules:
+              - id: e
+                summary: POST to rrg-commercial-pa
+                value:
+                  type: rawscript
+                  content: '!inline post_to_rrg-commercial-pa.inline_script.py'
+                  input_transforms:
+                    chat_history:
+                      type: javascript
+                      expr: flow_input.chat_history
+                    command:
+                      type: javascript
+                      expr: flow_input.command
+                    state:
+                      type: javascript
+                      expr: flow_input.state
+                    target_node:
+                      type: javascript
+                      expr: flow_input.target_node
+                    user_message:
+                      type: javascript
+                      expr: flow_input.user_message
+                  lock: '!inline post_to_rrg-commercial-pa.inline_script.lock'
+                  language: python3
+            expr: flow_input.target_node === 'commercial_pa'
+            parallel: true
+            skip_failure: true
         default:
           - id: d
             summary: Unknown worker error
@@ -96,7 +124,7 @@ schema:
       description: Worker state from previous invocation
     target_node:
       type: string
-      description: 'Worker node name: pnl or brochure'
+      description: 'Worker node name: pnl, brochure, or commercial_pa'
     user_message:
       type: string
       description: User chat message
