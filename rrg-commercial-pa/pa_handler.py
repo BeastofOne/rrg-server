@@ -232,11 +232,20 @@ def classify_action(user_message: str) -> str:
         One of: edit, preview, finalize, save, list_drafts, question, cancel.
         Defaults to "edit" for unrecognized responses.
     """
-    actions_list = ", ".join(sorted(VALID_ACTIONS))
-
     prompt = (
-        "Classify the following user message into exactly one of these action types: "
-        f"{actions_list}\n\n"
+        "You are classifying a user message in a purchase agreement workflow. "
+        "The user has an active draft and is providing input.\n\n"
+        "Action types:\n"
+        "- edit: User is providing deal information (names, addresses, dates, prices, "
+        "terms, phone numbers, emails, entity types, etc.) or asking to change/update values\n"
+        "- preview: User wants to see or download a preview of the document\n"
+        "- finalize: User wants to finalize, approve, or complete the agreement\n"
+        "- save: User wants to save progress and come back later\n"
+        "- list_drafts: User wants to see their saved drafts\n"
+        "- question: User is asking a general question NOT related to filling in deal terms\n"
+        "- cancel: User wants to cancel or delete the draft\n\n"
+        "IMPORTANT: If the message contains ANY deal information (names, addresses, dates, "
+        "prices, phone numbers, emails, entity names, terms), classify as 'edit'.\n\n"
         f"Message: {user_message}\n\n"
         "Reply with ONLY the action type, nothing else."
     )

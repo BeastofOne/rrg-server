@@ -37,23 +37,34 @@ class ChatClaudeCLI(BaseChatModel):
     def _llm_type(self) -> str:
         return "claude-cli"
 
-    def _format_messages(self, messages: List[BaseMessage]) -> str:
-        """Convert LangChain messages into a single prompt string for Claude CLI."""
-        parts = []
+    def _format_messages(self, messages: List[BaseMessage]) -> tuple:
+        """Convert LangChain messages into a prompt string and optional system prompt.
+
+        Returns:
+            (prompt_str, system_prompt_or_None)
+        """
+        system_parts = []
+        conversation_parts = []
         for msg in messages:
             if isinstance(msg, SystemMessage):
-                parts.append(f"[System]\n{msg.content}")
+                system_parts.append(msg.content)
             elif isinstance(msg, HumanMessage):
-                parts.append(f"[User]\n{msg.content}")
+                conversation_parts.append(msg.content)
             elif isinstance(msg, AIMessage):
-                parts.append(f"[Assistant]\n{msg.content}")
+                conversation_parts.append(f"[Assistant]\n{msg.content}")
             else:
-                parts.append(msg.content)
-        return "\n\n".join(parts)
+                conversation_parts.append(msg.content)
 
-    def _build_command(self, prompt: str) -> List[str]:
+        system_prompt = "\n\n".join(system_parts) if system_parts else None
+        prompt = "\n\n".join(conversation_parts)
+        return prompt, system_prompt
+
+    def _build_command(self, prompt: str, system_prompt: Optional[str] = None) -> List[str]:
         """Build the Claude CLI command with appropriate flags."""
         cmd = ["claude", "-p", prompt, "--model", self.model_name, "--no-chrome"]
+
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
 
         # Strip tools for pure chatbot mode
         if self.allowed_tools is not None:
@@ -69,8 +80,8 @@ class ChatClaudeCLI(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         """Call Claude CLI with the formatted prompt."""
-        prompt = self._format_messages(messages)
-        cmd = self._build_command(prompt)
+        prompt, system_prompt = self._format_messages(messages)
+        cmd = self._build_command(prompt, system_prompt)
 
         try:
             result = subprocess.run(
