@@ -69,13 +69,16 @@ with chat_tab:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            if msg.get("pdf_bytes"):
+            file_data = msg.get("pdf_bytes") or msg.get("docx_bytes")
+            file_name = msg.get("pdf_filename") or msg.get("docx_filename") or "output"
+            if file_data:
+                mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_name.endswith(".docx") else "application/pdf"
                 st.download_button(
-                    label=msg.get("pdf_label", "Download PDF"),
-                    data=msg["pdf_bytes"],
-                    file_name=msg.get("pdf_filename", "output.pdf"),
-                    mime="application/pdf",
-                    key=f"pdf_{id(msg)}",
+                    label="Download Preview",
+                    data=file_data,
+                    file_name=file_name,
+                    mime=mime,
+                    key=f"file_{id(msg)}",
                 )
 
     # Handle new input

@@ -12,6 +12,7 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "haiku")
 WORKER_URLS = {
     "pnl": os.getenv("WORKER_PNL_URL", "http://rrg-pnl:8100"),
     "brochure": os.getenv("WORKER_BROCHURE_URL", "http://rrg-brochure:8101"),
+    "commercial_pa": os.getenv("WORKER_PA_URL", "http://rrg-commercial-pa:8102"),
 }
 
 # Windmill settings — when enabled, worker calls route through Windmill flow
@@ -39,5 +40,10 @@ INTENTS = {
         "description": "User wants to create a property marketing brochure or offering memorandum",
         "help_text": "Create a property marketing brochure (offering memorandum)",
         "handler": "brochure",
+    },
+    "create_commercial_pa": {
+        "description": "User wants to create or resume a commercial purchase agreement",
+        "help_text": "Create a commercial purchase agreement (PA)",
+        "handler": "commercial_pa",
     },
 }

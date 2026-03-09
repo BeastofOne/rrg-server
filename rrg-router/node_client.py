@@ -32,6 +32,8 @@ class WorkerNodeClient:
                 "active": False,
                 "pdf_bytes": None,
                 "pdf_filename": None,
+                "docx_bytes": None,
+                "docx_filename": None,
                 "error": f"Unknown worker: {handler_name}",
             }
 
@@ -56,12 +58,22 @@ class WorkerNodeClient:
                 except Exception:
                     pass
 
+            # Decode DOCX if present
+            docx_bytes = None
+            if data.get("docx_bytes"):
+                try:
+                    docx_bytes = base64.b64decode(data["docx_bytes"])
+                except Exception:
+                    pass
+
             return {
                 "response": data.get("response", ""),
                 "state": data.get("state", {}),
                 "active": data.get("active", False),
                 "pdf_bytes": pdf_bytes,
                 "pdf_filename": data.get("pdf_filename"),
+                "docx_bytes": docx_bytes,
+                "docx_filename": data.get("docx_filename"),
                 "error": None,
             }
 
@@ -72,6 +84,8 @@ class WorkerNodeClient:
                 "active": False,
                 "pdf_bytes": None,
                 "pdf_filename": None,
+                "docx_bytes": None,
+                "docx_filename": None,
                 "error": "timeout",
             }
         except requests.RequestException as e:
@@ -81,5 +95,7 @@ class WorkerNodeClient:
                 "active": False,
                 "pdf_bytes": None,
                 "pdf_filename": None,
+                "docx_bytes": None,
+                "docx_filename": None,
                 "error": str(e),
             }
