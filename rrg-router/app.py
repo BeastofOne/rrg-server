@@ -81,9 +81,10 @@ with chat_tab:
                     key=f"file_{id(msg)}",
                 )
 
-    # Handle new input
-    prompt = st.chat_input("What can I help with?")
+# Chat input at module level — pins to bottom of viewport across all tabs
+prompt = st.chat_input("What can I help with?")
 
+with chat_tab:
     if prompt:
         # Show user message
         st.session_state.messages.append({"role": "user", "content": prompt})
