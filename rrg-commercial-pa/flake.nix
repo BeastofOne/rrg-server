@@ -22,11 +22,21 @@
           builtins.elem (lib.getName pkg) [ "claude-code" ];
       };
 
-      p2nix = poetry2nix.lib.mkPoetry2Nix { pkgs = linuxPkgs; };
+      # Patch poetry2nix's vendored pyproject.nix to fix:
+      # - pep599.nix: missing riscv64 in manyLinuxTargetMachines
+      # - pep600.nix: hard crash on unknown arch (use defensive lookup)
+      # - pypa.nix: parseABITag assertion on cp313t/cp314t/graalpy tags
+      # Upstream fix: pyproject-nix/pyproject.nix@8d77f34, 8fa4d66, 2db2d95
+      # Blocked in poetry2nix: PR #1925 (open, unmaintained)
+      patchedPoetry2Nix = linuxPkgs.applyPatches {
+        name = "poetry2nix-patched";
+        src = poetry2nix;
+        patches = [ ./nix/fix-pyproject-wheel-compat.patch ];
+      };
+
+      p2nix = import "${patchedPoetry2Nix}/default.nix" { pkgs = linuxPkgs; };
 
       # Python environment from poetry.lock (all deps pre-fetched, no network needed)
-      # NOTE: riscv64 wheel entries stripped from poetry.lock to avoid
-      # poetry2nix pep599.nix bug (missing riscv64 in manyLinuxTargetMachines)
       pythonEnv = p2nix.mkPoetryEnv {
         projectDir = self;
         python = linuxPkgs.python312;
@@ -91,7 +101,12 @@
           config.allowUnfreePredicate = pkg:
             builtins.elem (lib.getName pkg) [ "claude-code" ];
         };
-        p2nixDev = poetry2nix.lib.mkPoetry2Nix { inherit pkgs; };
+        patchedP2nixDev = pkgs.applyPatches {
+          name = "poetry2nix-patched-dev";
+          src = poetry2nix;
+          patches = [ ./nix/fix-pyproject-wheel-compat.patch ];
+        };
+        p2nixDev = import "${patchedP2nixDev}/default.nix" { inherit pkgs; };
       in {
         # Development shell — native to whatever system you're on
         devShells.default = pkgs.mkShell {

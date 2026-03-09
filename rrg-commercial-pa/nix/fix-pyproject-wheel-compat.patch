@@ -1,0 +1,46 @@
+diff -ruN a/vendor/pyproject.nix/lib/pep599.nix b/vendor/pyproject.nix/lib/pep599.nix
+--- a/vendor/pyproject.nix/lib/pep599.nix	2026-03-09 11:45:29
++++ b/vendor/pyproject.nix/lib/pep599.nix	2026-03-09 11:45:29
+@@ -17,5 +17,6 @@
+     ppc64 = "powerpc64";
+     ppc64le = "powerpc64le";
+     s390x = "s390x";
++    riscv64 = "riscv64";
+   };
+ }
+diff -ruN a/vendor/pyproject.nix/lib/pep600.nix b/vendor/pyproject.nix/lib/pep600.nix
+--- a/vendor/pyproject.nix/lib/pep600.nix	2026-03-09 11:45:37
++++ b/vendor/pyproject.nix/lib/pep600.nix	2026-03-09 11:45:55
+@@ -69,7 +69,7 @@
+       false
+     else if compareVersions "${sysMajor}.${sysMinor}" "${tagMajor}.${tagMinor}" < 0 then
+       false
+-    else if pep599.manyLinuxTargetMachines.${tagArch} != platform.parsed.cpu.name then
++    else if (pep599.manyLinuxTargetMachines.${tagArch} or tagArch) != platform.parsed.cpu.name then
+       false
+     else
+       true;
+diff -ruN a/vendor/pyproject.nix/lib/pypa.nix b/vendor/pyproject.nix/lib/pypa.nix
+--- a/vendor/pyproject.nix/lib/pypa.nix	2026-03-09 11:45:38
++++ b/vendor/pyproject.nix/lib/pypa.nix	2026-03-09 11:46:06
+@@ -98,13 +98,15 @@
+   parseABITag =
+     tag:
+     let
+-      m = match "([a-z]+)([0-9]*)_?([a-z0-9]*)" tag;
++      m = match "([a-z]+)([0-9]*)(.*)" tag;
++      impl = if m != null then elemAt m 0 else "unknown";
++      ver = if m != null then elemAt m 1 else "";
++      rest' = if m != null then elemAt m 2 else "";
+     in
+-    assert m != null;
+     {
+-      implementation = normalizeImpl (elemAt m 0);
+-      version = optionalString (elemAt m 1);
+-      rest = elemAt m 2;
++      implementation = normalizeImpl impl;
++      version = optionalString ver;
++      rest = rest';
+     };
+ 
+   /*
