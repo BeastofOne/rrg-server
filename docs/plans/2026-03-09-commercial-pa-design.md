@@ -261,15 +261,46 @@ Mirrors rrg-pnl `flake.nix`:
 
 ### rrg-router/app.py
 - Support `.docx` file downloads alongside PDFs
-- Detect MIME type from file extension
+- Detect MIME type from file extension (`.pdf` → `application/pdf`, `.docx` → `application/vnd.openxmlformats-officedocument.wordprocessingml.document`)
 - Download button label: **"Download Preview"** (universal, no file-type mention)
 - Capture handler name for label logic before `active_node` is cleared
 
-### rrg-router/node_client.py
-- Forward `docx_bytes`/`docx_filename` fields from worker response (same pattern as `pdf_bytes`)
+### rrg-router/node_client.py (lines 46-65)
+Currently only decodes `pdf_bytes` from worker responses. Add parallel handling for `docx_bytes`/`docx_filename`:
+
+```python
+# Existing (keep):
+pdf_bytes = None
+if data.get("pdf_bytes"):
+    try:
+        pdf_bytes = base64.b64decode(data["pdf_bytes"])
+    except Exception:
+        pass
+
+# New — add after pdf_bytes block:
+docx_bytes = None
+if data.get("docx_bytes"):
+    try:
+        docx_bytes = base64.b64decode(data["docx_bytes"])
+    except Exception:
+        pass
+
+return {
+    "response": data.get("response", ""),
+    "state": data.get("state", {}),
+    "active": data.get("active", False),
+    "pdf_bytes": pdf_bytes,
+    "pdf_filename": data.get("pdf_filename"),
+    "docx_bytes": docx_bytes,                  # new
+    "docx_filename": data.get("docx_filename"), # new
+    "error": None,
+}
+```
+
+Also update the error/timeout return dicts to include `"docx_bytes": None, "docx_filename": None`.
 
 ### rrg-router/windmill_client.py
-- Same: forward docx fields in response parsing
+Same change: forward `docx_bytes`/`docx_filename` fields in response parsing, mirroring the node_client.py pattern above.
 
 ---
 
