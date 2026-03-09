@@ -31,7 +31,7 @@ class ChatClaudeCLI(BaseChatModel):
 
     model_name: str = "haiku"
     timeout: int = 120
-    allowed_tools: Optional[str] = ""  # Empty string = no tools (pure chatbot)
+    allowed_tools: Optional[str] = ""  # Empty string = no tools (--tools "")
 
     @property
     def _llm_type(self) -> str:
@@ -68,7 +68,7 @@ class ChatClaudeCLI(BaseChatModel):
 
         # Strip tools for pure chatbot mode
         if self.allowed_tools is not None:
-            cmd.extend(["--allowedTools", self.allowed_tools])
+            cmd.extend(["--tools", self.allowed_tools])
 
         return cmd
 
