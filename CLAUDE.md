@@ -9,6 +9,7 @@ rrg-server/
 ├── rrg-router/            # Streamlit chat UI + intent router (port 8501)
 ├── rrg-pnl/              # P&L analysis (LangGraph + Flask, port 8100)
 ├── rrg-brochure/          # Property brochure generator (LangGraph + Flask, port 8101)
+├── rrg-commercial-pa/     # Purchase agreement generator (LangGraph + Flask, port 8102)
 ├── windmill-worker/       # Nix flake: stock Windmill + Claude CLI layer
 ├── rrg-claude-endpoint/   # DEPRECATED — Claude CLI now in containers directly
 ├── rrg-email-assistant/   # Email automation (MCP tools, no server)
@@ -23,7 +24,7 @@ rrg-server/
 
 **Four machines on Tailscale** (details → `.claude/rules/network.md`):
 - **jake-macbook** — Claude Code
-- **rrg-server** — Docker containers (pnl, brochure, router), Windmill, Postgres, DocuSeal
+- **rrg-server** — Docker containers (pnl, brochure, commercial-pa, router), Windmill, Postgres, DocuSeal
 - **pixel-9a** — SMS gateway (Termux + Flask, port 8686)
 - **larry-sms-gateway** — iMessage relay
 
@@ -31,14 +32,14 @@ rrg-server/
 
 ## Key Patterns
 
-**Worker contract:** rrg-pnl and rrg-brochure expose identical `POST /process` (command, user_message, chat_history, state) → (response, state, active, pdf_bytes).
+**Worker contract:** rrg-pnl, rrg-brochure, and rrg-commercial-pa expose identical `POST /process` (command, user_message, chat_history, state) → (response, state, active, pdf_bytes/docx_bytes). rrg-commercial-pa returns `docx_bytes` instead of `pdf_bytes`.
 
-**claude_llm.py:** Shared across all three services. LangChain `BaseChatModel` wrapping `claude -p` CLI. Model from env `CLAUDE_MODEL` (default: "haiku").
+**claude_llm.py:** Shared across all four services. LangChain `BaseChatModel` wrapping `claude -p` CLI. Model from env `CLAUDE_MODEL` (default: "haiku").
 
 **Windmill flows** (source in `windmill/f/switchboard/`):
 - `lead_intake` — 6-module pipeline: WiseAgent lookup → property match → dedup → drafts → approval gate → post-approval. Handles commercial (Crexi/LoopNet/BizBuySell) and residential (Realtor.com/Seller Hub/Social Connect/UpNest) sources.
 - `lead_conversation` — 4-module pipeline: classify reply → generate response → approval gate → post-approval. Source-branched prompts (commercial/residential buyer/residential seller) with rigid frameworks.
-- `message_router` — Routes to rrg-pnl or rrg-brochure
+- `message_router` — Routes to rrg-pnl, rrg-brochure, or rrg-commercial-pa
 - `gmail_pubsub_webhook` — Gmail Pub/Sub handler (lead detection, SENT matching, reply detection)
 
 **Gmail split inbox:**
