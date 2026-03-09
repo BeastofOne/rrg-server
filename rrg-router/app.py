@@ -29,6 +29,9 @@ if "worker_state" not in st.session_state:
 if "debug_data" not in st.session_state:
     st.session_state.debug_data = {}
 
+if "pending_action" not in st.session_state:
+    st.session_state.pending_action = None
+
 
 # ---------------------------------------------------------------------------
 # Load Graph and Client (Cached — survives Streamlit reruns)
@@ -66,7 +69,7 @@ chat_tab, signals_tab, debug_tab = st.tabs(["Chat", "Signals", "Debug"])
 
 with chat_tab:
     # Display existing messages
-    for msg in st.session_state.messages:
+    for idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             file_data = msg.get("pdf_bytes") or msg.get("docx_bytes")
@@ -78,11 +81,16 @@ with chat_tab:
                     data=file_data,
                     file_name=file_name,
                     mime=mime,
-                    key=f"file_{id(msg)}",
+                    key=f"file_{idx}",
                 )
 
 # Chat input at module level — pins to bottom of viewport across all tabs
 prompt = st.chat_input("What can I help with?")
+
+# Handle pending actions (e.g., preview button click)
+if not prompt and st.session_state.pending_action:
+    prompt = st.session_state.pending_action
+    st.session_state.pending_action = None
 
 with chat_tab:
     if prompt:
@@ -175,6 +183,16 @@ with chat_tab:
                     file_name=file_name,
                     mime=mime,
                 )
+
+            # Show Generate Preview button for active document workers
+            if (
+                not file_bytes
+                and response_data.get("active", False)
+                and st.session_state.active_node in ("commercial_pa", "pnl", "brochure")
+            ):
+                if st.button("Generate Preview", key="gen_preview"):
+                    st.session_state.pending_action = "preview"
+                    st.rerun()
 
         # Update session state from worker response
         st.session_state.worker_state = response_data.get("state", {})

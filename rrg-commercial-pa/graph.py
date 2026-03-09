@@ -275,7 +275,8 @@ def edit_node(state: PaState) -> dict:
             "docx_filename": None,
         }
 
-    variables = draft.get("variables", {})
+    old_variables = dict(draft.get("variables", {}))
+    variables = dict(old_variables)
     try:
         updated = apply_changes(
             variables,
@@ -288,10 +289,28 @@ def edit_node(state: PaState) -> dict:
     except (json.JSONDecodeError, ValueError, Exception):
         pass
 
+    # Show what changed
+    changed = {}
+    for k, v in variables.items():
+        if v is not None and (k not in old_variables or old_variables.get(k) != v):
+            changed[k] = v
+
+    response_parts = []
+    if changed:
+        filled = format_filled_summary(changed)
+        if filled:
+            response_parts.append(filled)
+    else:
+        response_parts.append("No new variables detected — try rephrasing.")
+
     remaining = format_remaining_variables(variables)
-    response_parts = ["Changes applied."]
     if remaining:
         response_parts.append(remaining)
+    else:
+        response_parts.append("All variables filled! Say **preview** to generate a draft, or **finalize** when ready.")
+
+    if remaining and changed:
+        response_parts.append("Say **preview** anytime to generate a draft with current values.")
 
     return {
         "response": "\n\n".join(response_parts),
