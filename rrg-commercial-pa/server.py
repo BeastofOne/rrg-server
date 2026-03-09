@@ -53,7 +53,7 @@ def process():
             docx_filename: str|null
         }
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     command = data.get("command", "create")
     user_message = data.get("user_message", "")
     chat_history = data.get("chat_history", [])
