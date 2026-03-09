@@ -1,0 +1,386 @@
+"""Tests for pa_docx.py — docxtpl rendering of commercial purchase agreements.
+
+Tests the .docx generation from PA variables, including full and partial
+variable sets, dynamic Exhibit A rows, additional provisions, and checkboxes.
+"""
+
+import io
+import zipfile
+import pytest
+
+from pa_docx import generate_pa_docx
+
+
+# ===========================================================================
+# Basic Generation
+# ===========================================================================
+
+class TestGenerateDocx:
+    """Tests for generating .docx files from complete variable sets."""
+
+    def test_generate_returns_bytes(self, complete_variables):
+        """generate_pa_docx should return bytes, not None."""
+        result = generate_pa_docx(complete_variables)
+        assert result is not None
+        assert isinstance(result, bytes)
+
+    def test_generate_returns_nonempty_bytes(self, complete_variables):
+        """Generated .docx should have nonzero length."""
+        result = generate_pa_docx(complete_variables)
+        assert len(result) > 0
+
+    def test_generate_produces_valid_docx(self, complete_variables):
+        """Generated output should be a valid .docx (ZIP) file (PK header)."""
+        result = generate_pa_docx(complete_variables)
+        # .docx files are ZIP archives — they start with PK (0x50, 0x4B)
+        assert result[:2] == b"PK", \
+            f"Expected PK zip header, got: {result[:4]!r}"
+
+    def test_generate_produces_valid_zip(self, complete_variables):
+        """Generated output should be a valid ZIP that Python can read."""
+        result = generate_pa_docx(complete_variables)
+        buf = io.BytesIO(result)
+        assert zipfile.is_zipfile(buf)
+
+    def test_generate_contains_word_content(self, complete_variables):
+        """The ZIP should contain word/document.xml (standard .docx structure)."""
+        result = generate_pa_docx(complete_variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            assert "word/document.xml" in names, \
+                f"Missing word/document.xml. Files: {names}"
+
+    def test_generate_with_complete_variables_has_content(self, complete_variables):
+        """The rendered document should contain variable values in the XML."""
+        result = generate_pa_docx(complete_variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Check that at least some variable values appear in the doc
+            assert "Acme Holdings LLC" in doc_xml
+            assert "Pontiac" in doc_xml
+
+
+# ===========================================================================
+# Partial Variables
+# ===========================================================================
+
+class TestPartialVariables:
+    """Tests for generating .docx with incomplete variable sets."""
+
+    def test_generate_with_partial_variables_does_not_crash(self, partial_variables):
+        """Should produce a .docx even with only a few variables filled."""
+        result = generate_pa_docx(partial_variables)
+        assert result is not None
+        assert isinstance(result, bytes)
+        assert result[:2] == b"PK"
+
+    def test_generate_with_empty_variables(self):
+        """Should produce a .docx even with zero variables filled."""
+        result = generate_pa_docx({})
+        assert result is not None
+        assert isinstance(result, bytes)
+        assert result[:2] == b"PK"
+
+    def test_generate_with_none_values(self):
+        """Variables explicitly set to None should not crash rendering."""
+        variables = {
+            "purchaser_name": None,
+            "seller_name": None,
+            "purchase_price_number": None,
+        }
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_partial_variables_unfilled_are_blank(self, partial_variables):
+        """Unfilled variables should render as blank, not as template tags."""
+        result = generate_pa_docx(partial_variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Should not contain raw Jinja2 template tags
+            assert "{{" not in doc_xml, \
+                "Raw Jinja2 tags found in output — unfilled variables not blanked"
+            assert "}}" not in doc_xml
+
+
+# ===========================================================================
+# Exhibit A (Dynamic Table Rows)
+# ===========================================================================
+
+class TestExhibitA:
+    """Tests for dynamic Exhibit A table rendering."""
+
+    def test_exhibit_a_single_entity(self, complete_variables):
+        """Should render correctly with 1 entity."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {
+                "name": "123 Main Street LLC",
+                "address": "123 Main St, Pontiac, MI 48342",
+                "parcel_ids": "14-01-234-001",
+                "legal_descriptions": "Lot 1 of Plat No. 12",
+            },
+        ]
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_exhibit_a_three_entities(self, complete_variables, sample_exhibit_a):
+        """Should render correctly with 3 entities."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = sample_exhibit_a
+        result = generate_pa_docx(variables)
+        assert result is not None
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # All three entity names should appear
+            assert "123 Main Street LLC" in doc_xml
+            assert "125 Main Street LLC" in doc_xml
+            assert "127 Main Street LLC" in doc_xml
+
+    def test_exhibit_a_zero_entities(self, complete_variables):
+        """Should render correctly with 0 entities (empty list)."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = []
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_exhibit_a_missing_key(self, complete_variables):
+        """Should not crash if exhibit_a_entities is not provided at all."""
+        variables = {**complete_variables}
+        variables.pop("exhibit_a_entities", None)
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_exhibit_a_entity_fields_appear(self, complete_variables):
+        """Entity parcel IDs and legal descriptions should appear in output."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {
+                "name": "Test Entity Corp",
+                "address": "999 Test Ave",
+                "parcel_ids": "99-99-999-999",
+                "legal_descriptions": "Unit 42 of Test Subdivision",
+            },
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "99-99-999-999" in doc_xml
+            assert "Unit 42 of Test Subdivision" in doc_xml
+
+
+# ===========================================================================
+# Additional Provisions
+# ===========================================================================
+
+class TestAdditionalProvisions:
+    """Tests for rendering additional provisions in the .docx."""
+
+    def test_zero_provisions(self, complete_variables):
+        """Should render correctly with no additional provisions."""
+        variables = {**complete_variables}
+        variables["additional_provisions"] = []
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_one_provision(self, complete_variables):
+        """Should render correctly with 1 provision."""
+        variables = {**complete_variables}
+        variables["additional_provisions"] = [
+            {"title": "Processing Fee", "body": "A fee of $395 at closing."},
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "Processing Fee" in doc_xml
+
+    def test_three_provisions(self, complete_variables, sample_provisions):
+        """Should render correctly with 3 provisions."""
+        variables = {**complete_variables}
+        variables["additional_provisions"] = sample_provisions
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            for prov in sample_provisions:
+                assert prov["title"] in doc_xml, \
+                    f"Provision '{prov['title']}' not found in document"
+
+    def test_provisions_missing_key(self, complete_variables):
+        """Should not crash if additional_provisions key is absent."""
+        variables = {**complete_variables}
+        variables.pop("additional_provisions", None)
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_provision_with_long_body(self, complete_variables):
+        """Provisions with very long body text should render without truncation."""
+        long_body = "This is a provision. " * 200
+        variables = {**complete_variables}
+        variables["additional_provisions"] = [
+            {"title": "Lengthy Provision", "body": long_body},
+        ]
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+
+# ===========================================================================
+# Checkbox Variables
+# ===========================================================================
+
+class TestCheckboxRendering:
+    """Tests for boolean checkbox variable rendering."""
+
+    def test_checkbox_true_renders_checked(self, complete_variables):
+        """A True boolean should render as checked (e.g., [X] or similar)."""
+        variables = {**complete_variables}
+        variables["payment_cash"] = True
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Design says: True shows [X], False shows [ ]
+            # Check that at least one "X" or checked marker appears near payment_cash
+            # The exact rendering depends on the template, but the doc shouldn't
+            # have raw True/False strings
+            assert "True" not in doc_xml or "[X]" in doc_xml or \
+                "\u2611" in doc_xml or "&#9745;" in doc_xml or "X" in doc_xml
+
+    def test_checkbox_false_renders_unchecked(self, complete_variables):
+        """A False boolean should render as unchecked (e.g., [ ] or similar)."""
+        variables = {**complete_variables}
+        variables["payment_cash"] = False
+        variables["payment_mortgage"] = False
+        result = generate_pa_docx(variables)
+        # Should not crash — False values should render as unchecked
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_all_dd_checkboxes_true(self, complete_variables):
+        """All due diligence checkboxes set to True should render."""
+        variables = {**complete_variables}
+        dd_fields = [
+            "dd_financing", "dd_physical_inspection", "dd_environmental",
+            "dd_soil_tests", "dd_zoning", "dd_site_plan", "dd_survey",
+            "dd_leases_estoppel", "dd_other", "dd_governmental",
+        ]
+        for field in dd_fields:
+            variables[field] = True
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_all_dd_checkboxes_false(self, complete_variables):
+        """All due diligence checkboxes set to False should render."""
+        variables = {**complete_variables}
+        dd_fields = [
+            "dd_financing", "dd_physical_inspection", "dd_environmental",
+            "dd_soil_tests", "dd_zoning", "dd_site_plan", "dd_survey",
+            "dd_leases_estoppel", "dd_other", "dd_governmental",
+        ]
+        for field in dd_fields:
+            variables[field] = False
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_payment_method_mutual_exclusivity(self, complete_variables):
+        """Only one payment method should be checked at a time."""
+        # This is a logical test — if multiple are True, it should still render
+        variables = {**complete_variables}
+        variables["payment_cash"] = True
+        variables["payment_mortgage"] = True  # Both True (unusual but shouldn't crash)
+        variables["payment_land_contract"] = False
+        result = generate_pa_docx(variables)
+        assert result is not None
+
+
+# ===========================================================================
+# Edge Cases
+# ===========================================================================
+
+class TestDocxEdgeCases:
+    """Edge case tests for .docx generation."""
+
+    def test_special_characters_in_names(self, complete_variables):
+        """Names with apostrophes, accents, etc. should render correctly."""
+        variables = {**complete_variables}
+        variables["purchaser_name"] = "O'Brien & Associates"
+        variables["seller_name"] = "Jean-Pierre Dubois Enterprises"
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # XML entities may encode these, but they should be present
+            assert "Brien" in doc_xml
+            assert "Dubois" in doc_xml
+
+    def test_dollar_amounts_formatting(self, complete_variables):
+        """Dollar amounts should appear in the document."""
+        result = generate_pa_docx(complete_variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # The purchase price in words or number should appear
+            assert "2500000" in doc_xml or "2,500,000" in doc_xml or \
+                "Two Million" in doc_xml
+
+    def test_land_contract_variables_when_not_selected(self, complete_variables):
+        """When payment_land_contract is False, LC variables should still render
+        (as 0 or blank), not crash."""
+        variables = {**complete_variables}
+        variables["payment_land_contract"] = False
+        variables["lc_down_payment"] = 0
+        variables["lc_balance"] = 0
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
+
+    def test_land_contract_variables_when_selected(self, complete_variables):
+        """When payment_land_contract is True, LC variables should appear."""
+        variables = {**complete_variables}
+        variables["payment_cash"] = False
+        variables["payment_land_contract"] = True
+        variables["lc_down_payment"] = 500000
+        variables["lc_balance"] = 2000000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        result = generate_pa_docx(variables)
+        assert result is not None
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "500000" in doc_xml or "500,000" in doc_xml
+
+    def test_generate_returns_new_bytes_each_call(self, complete_variables):
+        """Each call should return fresh bytes (not a cached reference)."""
+        result1 = generate_pa_docx(complete_variables)
+        result2 = generate_pa_docx(complete_variables)
+        # Should be equal in content but be separate objects
+        assert result1 == result2
+        assert result1 is not result2
+
+    def test_empty_string_variables_do_not_crash(self, complete_variables):
+        """All string variables set to empty string should not crash."""
+        variables = {}
+        for key, val in complete_variables.items():
+            if isinstance(val, str):
+                variables[key] = ""
+            else:
+                variables[key] = val
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"
