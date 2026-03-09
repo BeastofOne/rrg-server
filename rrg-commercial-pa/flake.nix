@@ -24,11 +24,24 @@
 
       p2nix = poetry2nix.lib.mkPoetry2Nix { pkgs = linuxPkgs; };
 
-      # Python environment from poetry.lock (all deps pre-fetched, no network needed)
+      # Python environment from poetry.lock
+      # preferWheels = false avoids poetry2nix riscv64 wheel resolution bug
+      # (lxml publishes riscv64 manylinux wheels that trigger missing arch in pep599.nix)
       pythonEnv = p2nix.mkPoetryEnv {
         projectDir = self;
         python = linuxPkgs.python312;
-        preferWheels = true;
+        preferWheels = false;
+        overrides = p2nix.defaultPoetryOverrides.extend (final: prev: {
+          lxml = prev.lxml.overridePythonAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or []) ++ [
+              linuxPkgs.pkg-config
+            ];
+            buildInputs = (old.buildInputs or []) ++ [
+              linuxPkgs.libxml2
+              linuxPkgs.libxslt
+            ];
+          });
+        });
       };
 
       # Application source — all Python files + templates
