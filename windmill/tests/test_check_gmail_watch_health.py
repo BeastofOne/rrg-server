@@ -8,8 +8,7 @@ All other logic is tested with real code.
 import sys
 import types
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock, call
-import json
+from unittest.mock import patch, MagicMock
 
 import pytest
 
