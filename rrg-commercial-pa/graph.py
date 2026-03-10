@@ -302,10 +302,8 @@ def edit_node(state: PaState) -> dict:
 
     response_parts = []
     if changed:
-        count = len(changed)
-        response_parts.append(
-            f"Got it — {count} variable{'s' if count != 1 else ''} updated."
-        )
+        filled = format_filled_summary(changed)
+        response_parts.append(f"Got it:\n{filled}")
     else:
         response_parts.append("No new variables detected — try rephrasing.")
 
