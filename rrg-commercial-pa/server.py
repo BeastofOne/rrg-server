@@ -88,6 +88,7 @@ def process():
 
     # Build response
     pa_active = result.get("pa_active", True)
+    pa_action = result.get("pa_action")
     docx_bytes_raw = result.get("docx_bytes")
 
     # Encode DOCX as base64 if present
@@ -95,15 +96,24 @@ def process():
     if docx_bytes_raw:
         docx_b64 = base64.b64encode(docx_bytes_raw).decode("utf-8")
 
+    # For preview/finalize actions, docx goes in the response (shown in chat).
+    # For edit/start_new, docx goes in state as preview_docx (for instant download button).
+    is_preview_action = pa_action in ("preview", "finalize")
+
+    state = {
+        "draft_id": result.get("draft_id"),
+        "pa_active": pa_active,
+    }
+    if docx_b64 and not is_preview_action:
+        state["preview_docx"] = docx_b64
+        state["preview_filename"] = result.get("docx_filename")
+
     return jsonify({
         "response": result.get("response", ""),
-        "state": {
-            "draft_id": result.get("draft_id"),
-            "pa_active": pa_active,
-        },
+        "state": state,
         "active": pa_active,
-        "docx_bytes": docx_b64,
-        "docx_filename": result.get("docx_filename"),
+        "docx_bytes": docx_b64 if is_preview_action else None,
+        "docx_filename": result.get("docx_filename") if is_preview_action else None,
     })
 
 

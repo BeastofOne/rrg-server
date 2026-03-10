@@ -2,7 +2,6 @@
 
 import base64
 import streamlit as st
-import streamlit.components.v1 as components
 from graph import build_graph
 from node_client import WorkerNodeClient
 from windmill_client import WindmillClient
@@ -31,8 +30,6 @@ if "worker_state" not in st.session_state:
 if "debug_data" not in st.session_state:
     st.session_state.debug_data = {}
 
-if "preview_data" not in st.session_state:
-    st.session_state.preview_data = None  # {"bytes": ..., "filename": ...}
 
 
 # ---------------------------------------------------------------------------

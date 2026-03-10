@@ -170,12 +170,22 @@ def start_new_node(state: PaState) -> dict:
             "purchase price, and any other terms you know."
         )
 
+    # Pre-generate preview so the download button is instant
+    preview_bytes = None
+    preview_filename = None
+    if initial_vars:
+        try:
+            preview_bytes = generate_pa_docx(initial_vars)
+            preview_filename = f"PA_{prop_address}.docx"
+        except Exception:
+            pass
+
     return {
         "response": "\n\n".join(response_parts),
         "draft_id": draft_id,
         "pa_active": True,
-        "docx_bytes": None,
-        "docx_filename": None,
+        "docx_bytes": preview_bytes,
+        "docx_filename": preview_filename,
     }
 
 
@@ -313,21 +323,25 @@ def edit_node(state: PaState) -> dict:
     remaining = format_remaining_variables(variables)
     if remaining:
         response_parts.append(f"We still need:\n{remaining}")
-        if changed:
-            response_parts.append(
-                "Would you like to see what it looks like so far?"
-            )
     else:
-        response_parts.append(
-            "All variables are filled! Would you like to see what it looks like so far?"
-        )
+        response_parts.append("All variables are filled!")
+
+    # Pre-generate preview so the download button is instant
+    preview_bytes = None
+    preview_filename = None
+    try:
+        preview_bytes = generate_pa_docx(variables)
+        prop_address = draft.get("property_address", "Property") if draft else "Property"
+        preview_filename = f"PA_{prop_address}.docx"
+    except Exception:
+        pass
 
     return {
         "response": "\n\n".join(response_parts),
         "draft_id": draft_id,
         "pa_active": True,
-        "docx_bytes": None,
-        "docx_filename": None,
+        "docx_bytes": preview_bytes,
+        "docx_filename": preview_filename,
     }
 
 
