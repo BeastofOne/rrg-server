@@ -73,13 +73,24 @@ def _get_llm():
 # ---------------------------------------------------------------------------
 
 def _strip_fences(text: str) -> str:
-    """Remove markdown code fences (```json ... ```) from LLM output."""
+    """Extract JSON from LLM output, handling fences and trailing text."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
-        # Remove first line (```json or ```) and last line (```)
         text = "\n".join(lines[1:-1]).strip()
-    return text
+    # Extract just the JSON object — LLM sometimes appends explanations
+    start = text.find("{")
+    if start == -1:
+        return text
+    depth = 0
+    for i, ch in enumerate(text[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return text[start:]
 
 
 # ---------------------------------------------------------------------------
