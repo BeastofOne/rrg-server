@@ -3,7 +3,9 @@
 # A bare `wmill sync push` is now safe (won't wipe resources/variables/secrets).
 includes:
   - "f/**"
-excludes: []
+excludes:
+  - "f/__init__*"
+  - "f/**/__init__*"
 defaultTs: "bun"
 skipVariables: true
 skipResources: true
