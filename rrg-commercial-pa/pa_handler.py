@@ -285,12 +285,10 @@ def format_remaining_variables(variables: dict) -> str:
     if not missing:
         return ""
 
-    # Group by prefix for readability
-    lines = ["Remaining variables to fill:\n"]
+    lines = []
     for field in missing:
-        # Convert field_name to readable label
         label = field.replace("_", " ").title()
-        lines.append(f"  - {label} ({field})")
+        lines.append(f"- {label}")
 
     return "\n".join(lines)
 

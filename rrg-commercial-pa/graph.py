@@ -121,7 +121,7 @@ def start_new_node(state: PaState) -> dict:
         if filled_summary:
             response_parts.append(filled_summary)
         if remaining:
-            response_parts.append(remaining)
+            response_parts.append(f"Remaining variables to fill:\n{remaining}")
 
         return {
             "response": "\n\n".join(response_parts),
@@ -160,7 +160,7 @@ def start_new_node(state: PaState) -> dict:
     if filled_summary:
         response_parts.append(filled_summary)
     if remaining:
-        response_parts.append(remaining)
+        response_parts.append(f"Remaining variables to fill:\n{remaining}")
     else:
         response_parts.append(
             "Tell me about the deal: buyer name, property address, "
@@ -240,7 +240,7 @@ def extract_node(state: PaState) -> dict:
     if filled_summary:
         response_parts.append(filled_summary)
     if remaining:
-        response_parts.append(remaining)
+        response_parts.append(f"Remaining variables to fill:\n{remaining}")
     if not response_parts:
         response_parts.append("Variables updated.")
 
@@ -297,20 +297,24 @@ def edit_node(state: PaState) -> dict:
 
     response_parts = []
     if changed:
-        filled = format_filled_summary(changed)
-        if filled:
-            response_parts.append(filled)
+        count = len(changed)
+        response_parts.append(
+            f"Got it — {count} variable{'s' if count != 1 else ''} updated."
+        )
     else:
         response_parts.append("No new variables detected — try rephrasing.")
 
     remaining = format_remaining_variables(variables)
     if remaining:
-        response_parts.append(remaining)
+        response_parts.append(f"We still need:\n{remaining}")
+        if changed:
+            response_parts.append(
+                "Would you like to see what it looks like so far?"
+            )
     else:
-        response_parts.append("All variables filled! Say **preview** to generate a draft, or **finalize** when ready.")
-
-    if remaining and changed:
-        response_parts.append("Say **preview** anytime to generate a draft with current values.")
+        response_parts.append(
+            "All variables are filled! Would you like to see what it looks like so far?"
+        )
 
     return {
         "response": "\n\n".join(response_parts),
