@@ -14,47 +14,77 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# All PA variable field names (canonical list from design doc schema)
+# Field groups — each group has (name, description, [fields])
+# Description is shown to the LLM so it understands what each section means.
 # ---------------------------------------------------------------------------
 
-ALL_VARIABLE_FIELDS = [
-    # Party — Purchaser
-    "effective_date_day", "effective_date_month", "effective_date_year",
-    "purchaser_name", "purchaser_entity_type", "purchaser_address",
-    "purchaser_phone", "purchaser_email", "purchaser_fax",
-    "purchaser_copy_name", "purchaser_copy_address",
-    "purchaser_copy_phone", "purchaser_copy_email",
-    # Party — Seller
-    "seller_name", "seller_address", "seller_phone", "seller_email",
-    "seller_fax", "seller_copy_name", "seller_copy_address",
-    "seller_copy_phone", "seller_copy_email",
-    # Property
-    "property_location_type", "property_municipality", "property_county",
-    "property_address", "property_parcel_ids", "property_legal_description",
-    # Financial
-    "purchase_price_words", "purchase_price_number",
-    "payment_cash", "payment_mortgage", "payment_land_contract",
-    "lc_down_payment", "lc_balance", "lc_interest_rate",
-    "lc_amortization_years", "lc_balloon_months",
-    "earnest_money_words", "earnest_money_number",
-    # Title & Escrow
-    "title_company_name", "title_company_address",
-    "title_insurance_paid_by", "title_with_standard_exceptions",
-    # Due Diligence
-    "dd_financing", "dd_financing_days",
-    "dd_physical_inspection", "dd_environmental", "dd_soil_tests",
-    "dd_zoning", "dd_site_plan", "dd_survey", "dd_leases_estoppel",
-    "dd_other", "dd_other_description", "dd_governmental",
-    "inspection_period_days",
-    # Closing
-    "closing_days", "closing_days_words",
-    # Broker
-    "broker_name", "broker_commission_pct", "broker_commission_amount",
-    "seller_broker_name", "seller_broker_company",
-    # Offer Expiration
-    "offer_expiration_time", "offer_expiration_ampm",
-    "offer_expiration_day", "offer_expiration_year",
+FIELD_GROUPS = [
+    ("Effective Date", "date the agreement takes effect", [
+        "effective_date_day", "effective_date_month", "effective_date_year",
+    ]),
+    ("Purchaser", "the buying entity", [
+        "purchaser_name", "purchaser_entity_type", "purchaser_address",
+        "purchaser_phone", "purchaser_email", "purchaser_fax",
+    ]),
+    ("Purchaser Copy", "separate contact who receives copies of notices, e.g. attorney — NOT the purchaser", [
+        "purchaser_copy_name", "purchaser_copy_address",
+        "purchaser_copy_phone", "purchaser_copy_email",
+    ]),
+    ("Seller", "the selling entity", [
+        "seller_name", "seller_address", "seller_phone", "seller_email",
+        "seller_fax",
+    ]),
+    ("Seller Copy", "separate contact who receives copies of notices — NOT the seller", [
+        "seller_copy_name", "seller_copy_address",
+        "seller_copy_phone", "seller_copy_email",
+    ]),
+    ("Property", "the real property being purchased", [
+        "property_location_type", "property_municipality", "property_county",
+        "property_address", "property_parcel_ids", "property_legal_description",
+    ]),
+    ("Financial", "purchase price, payment method, earnest money", [
+        "purchase_price_words", "purchase_price_number",
+        "payment_cash", "payment_mortgage", "payment_land_contract",
+        "lc_down_payment", "lc_balance", "lc_interest_rate",
+        "lc_amortization_years", "lc_balloon_months",
+        "earnest_money_words", "earnest_money_number",
+    ]),
+    ("Title & Escrow", "title company and insurance details", [
+        "title_company_name", "title_company_address",
+        "title_insurance_paid_by", "title_with_standard_exceptions",
+    ]),
+    ("Due Diligence", "contingencies and inspection terms", [
+        "dd_financing", "dd_financing_days",
+        "dd_physical_inspection", "dd_environmental", "dd_soil_tests",
+        "dd_zoning", "dd_site_plan", "dd_survey", "dd_leases_estoppel",
+        "dd_other", "dd_other_description", "dd_governmental",
+        "inspection_period_days",
+    ]),
+    ("Closing", "closing timeline", [
+        "closing_days", "closing_days_words",
+    ]),
+    ("Broker", "broker names and commission", [
+        "broker_name", "broker_commission_pct", "broker_commission_amount",
+        "seller_broker_name", "seller_broker_company",
+    ]),
+    ("Offer Expiration", "when the offer expires", [
+        "offer_expiration_time", "offer_expiration_ampm",
+        "offer_expiration_day", "offer_expiration_year",
+    ]),
 ]
+
+# Flat list derived from groups — single source of truth
+ALL_VARIABLE_FIELDS = [f for _, _, fields in FIELD_GROUPS for f in fields]
+
+
+def _format_fields_for_llm() -> str:
+    """Format field groups for LLM prompts with descriptions."""
+    lines = []
+    for name, desc, fields in FIELD_GROUPS:
+        lines.append(f"{name.upper()} ({desc}):")
+        lines.append(f"  {', '.join(fields)}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +140,16 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
     Raises:
         json.JSONDecodeError or ValueError: If LLM returns invalid JSON.
     """
-    fields_list = ", ".join(ALL_VARIABLE_FIELDS)
+    grouped_fields = _format_fields_for_llm()
 
     prompt = (
         "You are a commercial real estate purchase agreement assistant. "
         "Extract any purchase agreement variables from the user's message.\n\n"
-        f"Known variable fields: {fields_list}\n\n"
+        f"Variable fields by section:\n{grouped_fields}\n"
+        "IMPORTANT: Do NOT duplicate values between sections. "
+        "Purchaser Copy and Seller Copy are for SEPARATE contacts (e.g. attorneys), "
+        "not copies of the purchaser/seller info. "
+        "Signer information (who signs the document) has no variable — ignore it.\n\n"
         "Also extract 'exhibit_a_entities' (list of entity dicts with name, address, "
         "parcel_ids, legal_descriptions) and 'additional_provisions' (list of dicts "
         "with title and body) if mentioned.\n\n"
@@ -127,6 +161,7 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
     prompt += (
         f"User message: {user_message}\n\n"
         "Return ONLY a JSON object with the extracted variables. "
+        "Use ONLY the exact field names listed above (snake_case). "
         "Only include variables that are clearly mentioned or implied. "
         "Do not include variables you cannot determine from the message."
     )
@@ -163,12 +198,16 @@ def apply_changes(
     Raises:
         json.JSONDecodeError or ValueError: If LLM returns invalid JSON.
     """
-    fields_list = ", ".join(ALL_VARIABLE_FIELDS)
+    grouped_fields = _format_fields_for_llm()
 
     prompt = (
         "You are a commercial real estate purchase agreement assistant. "
         "The user wants to modify existing purchase agreement variables.\n\n"
-        f"Valid variable field names: {fields_list}\n\n"
+        f"Variable fields by section:\n{grouped_fields}\n"
+        "IMPORTANT: Do NOT duplicate values between sections. "
+        "Purchaser Copy and Seller Copy are for SEPARATE contacts (e.g. attorneys), "
+        "not copies of the purchaser/seller info. "
+        "Signer information (who signs the document) has no variable — ignore it.\n\n"
         f"Current variables: {json.dumps(existing_data)}\n\n"
     )
 
@@ -282,30 +321,50 @@ def classify_action(user_message: str) -> str:
 # format_remaining_variables (pure — no LLM)
 # ---------------------------------------------------------------------------
 
+def _strip_group_prefix(field: str, group_name: str) -> str:
+    """Strip the group prefix from a field name for display.
+
+    E.g., 'purchaser_copy_name' under group 'Purchaser Copy' → 'Name'.
+    """
+    prefix = group_name.lower().replace(" & ", "_").replace(" ", "_") + "_"
+    if field.startswith(prefix):
+        short = field[len(prefix):]
+    elif field.startswith("dd_"):
+        short = field[3:]
+    elif field.startswith("lc_"):
+        short = field[3:]
+    else:
+        short = field
+    return short.replace("_", " ").title()
+
+
 def format_remaining_variables(variables: dict) -> str:
-    """Generate a checklist of PA variables that are still missing/unfilled.
+    """Generate a grouped checklist of PA variables that are still missing.
 
     Args:
         variables: Dict of currently filled variable names to values.
 
     Returns:
-        Formatted string listing missing variables. Empty string or
-        completion message if all are filled.
+        Formatted string listing missing variables grouped by section.
+        Empty string if all are filled.
     """
-    missing = []
-    for field in ALL_VARIABLE_FIELDS:
-        if not variables.get(field):
-            missing.append(field)
+    sections = []
+    for group_name, group_desc, fields in FIELD_GROUPS:
+        missing = [f for f in fields if not variables.get(f)]
+        if not missing:
+            continue
+        # Short description for copy groups to help the user
+        if "copy" in group_name.lower():
+            header = f"**{group_name}** (e.g. attorney for notices):"
+        else:
+            header = f"**{group_name}:**"
+        lines = [header]
+        for field in missing:
+            label = _strip_group_prefix(field, group_name)
+            lines.append(f"- {label}")
+        sections.append("\n".join(lines))
 
-    if not missing:
-        return ""
-
-    lines = []
-    for field in missing:
-        label = field.replace("_", " ").title()
-        lines.append(f"- {label}")
-
-    return "\n".join(lines)
+    return "\n\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -313,25 +372,40 @@ def format_remaining_variables(variables: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def format_filled_summary(extracted: dict) -> str:
-    """Format newly extracted variables as a confirmation summary.
+    """Format newly extracted variables as a grouped confirmation summary.
 
     Args:
         extracted: Dict of variable names to their extracted values.
 
     Returns:
-        Formatted string summarizing what was extracted. Skips None values.
+        Formatted string summarizing what was extracted. Skips None/empty values.
     """
     if not extracted:
         return ""
 
-    lines = []
-    for key, value in extracted.items():
-        if value is None:
-            continue
-        label = key.replace("_", " ").title()
-        lines.append(f"- **{label}:** {value}")
-
-    if not lines:
+    # Build a set of filled keys for quick lookup
+    filled = {k for k, v in extracted.items() if v}
+    if not filled:
         return ""
 
-    return "\n".join(lines)
+    sections = []
+    for group_name, _, fields in FIELD_GROUPS:
+        group_filled = [f for f in fields if f in filled]
+        if not group_filled:
+            continue
+        lines = [f"**{group_name}:**"]
+        for field in group_filled:
+            label = _strip_group_prefix(field, group_name)
+            lines.append(f"- **{label}:** {extracted[field]}")
+        sections.append("\n".join(lines))
+
+    # Handle any keys not in FIELD_GROUPS (e.g. exhibit_a_entities)
+    known_fields = set(ALL_VARIABLE_FIELDS)
+    extras = [k for k in filled if k not in known_fields]
+    if extras:
+        lines = ["**Other:**"]
+        for key in extras:
+            lines.append(f"- **{key.replace('_', ' ').title()}:** {extracted[key]}")
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
