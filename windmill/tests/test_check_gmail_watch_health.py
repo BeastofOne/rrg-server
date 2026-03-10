@@ -105,7 +105,7 @@ class TestHealthy:
 
     @patch("f.switchboard.check_gmail_watch_health.requests")
     def test_healthy_at_boundary(self, mock_requests):
-        """At exactly 48h, still healthy (<=48 check)."""
+        """Just under 48h, still healthy (avoids float precision flakiness)."""
         _setup_wmill_vars()
         ts = _recent_timestamp(hours_ago=47)
         mock_requests.get.return_value = _mock_jobs_response(ts)
@@ -336,6 +336,14 @@ class TestCheckWebhookStaleness:
         hours, last_run = check_webhook_staleness("token")
         assert 9 < hours < 11
         assert last_run == ts
+
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_returns_none_when_created_at_empty_string(self, mock_requests):
+        """When created_at is an empty string, should return (None, None)."""
+        mock_requests.get.return_value = _mock_jobs_response("")
+        hours, last_run = check_webhook_staleness("token")
+        assert hours is None
+        assert last_run is None
 
     @patch("f.switchboard.check_gmail_watch_health.requests")
     def test_raises_on_api_error(self, mock_requests):

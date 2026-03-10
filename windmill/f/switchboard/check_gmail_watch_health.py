@@ -122,8 +122,11 @@ def attempt_self_heal(token):
             if resp.status_code == 200:
                 results.append({"script": script_name, "account": account, "success": True})
             else:
-                body = resp.json()
-                error_msg = body.get("error", {}).get("message", resp.text[:200])
+                try:
+                    body = resp.json()
+                    error_msg = body.get("error", {}).get("message", resp.text[:200])
+                except (ValueError, KeyError):
+                    error_msg = resp.text[:200]
                 results.append({"script": script_name, "account": account, "success": False, "error": error_msg})
         except Exception as e:
             results.append({"script": script_name, "account": account, "success": False, "error": str(e)[:200]})
@@ -133,7 +136,7 @@ def attempt_self_heal(token):
 def format_failure_alert(results, hours_since=None, reason=None):
     """Build SMS alert message from failed renewal results."""
     parts = []
-    if hours_since:
+    if hours_since is not None:
         parts.append(f"Gmail webhook stale ({hours_since}h). Self-heal failed:")
     elif reason:
         parts.append(f"Gmail watch issue ({reason}). Self-heal failed:")
