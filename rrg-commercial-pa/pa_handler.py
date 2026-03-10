@@ -318,10 +318,9 @@ def format_filled_summary(extracted: dict) -> str:
         if value is None:
             continue
         label = key.replace("_", " ").title()
-        lines.append(f"  {label}: {value}")
+        lines.append(f"- **{label}:** {value}")
 
     if not lines:
         return ""
 
-    header = "Extracted variables:\n"
-    return header + "\n".join(lines)
+    return "\n".join(lines)

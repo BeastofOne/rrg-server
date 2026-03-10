@@ -122,7 +122,7 @@ def start_new_node(state: PaState) -> dict:
 
         response_parts = [f"Resumed draft for {draft['property_address']}."]
         if filled_summary:
-            response_parts.append(filled_summary)
+            response_parts.append(f"Variables on file:\n{filled_summary}")
         if remaining:
             response_parts.append(f"Remaining variables to fill:\n{remaining}")
 
@@ -161,7 +161,7 @@ def start_new_node(state: PaState) -> dict:
 
     response_parts = ["New purchase agreement draft created."]
     if filled_summary:
-        response_parts.append(filled_summary)
+        response_parts.append(f"Got it, here's what I picked up:\n{filled_summary}")
     if remaining:
         response_parts.append(f"Remaining variables to fill:\n{remaining}")
     else:
