@@ -7,9 +7,12 @@ Entry point is `build_graph()` which returns a compiled LangGraph.
 """
 
 import json
+import logging
 import os
 import re
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
@@ -286,8 +289,8 @@ def edit_node(state: PaState) -> dict:
         if isinstance(updated, dict):
             store.update_draft(draft_id, updated)
             variables = updated
-    except (json.JSONDecodeError, ValueError, Exception):
-        pass
+    except Exception as exc:
+        logger.warning("apply_changes failed: %s", exc)
 
     # Show what changed
     changed = {}

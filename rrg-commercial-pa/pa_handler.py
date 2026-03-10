@@ -152,9 +152,12 @@ def apply_changes(
     Raises:
         json.JSONDecodeError or ValueError: If LLM returns invalid JSON.
     """
+    fields_list = ", ".join(ALL_VARIABLE_FIELDS)
+
     prompt = (
         "You are a commercial real estate purchase agreement assistant. "
         "The user wants to modify existing purchase agreement variables.\n\n"
+        f"Valid variable field names: {fields_list}\n\n"
         f"Current variables: {json.dumps(existing_data)}\n\n"
     )
 
@@ -168,6 +171,7 @@ def apply_changes(
         f"User instruction: {user_message}\n\n"
         "Return ONLY a complete JSON object with ALL variables — "
         "the unchanged ones plus any modified ones. "
+        "Use ONLY the exact field names listed above (snake_case). "
         "Preserve all existing values that were not changed."
     )
 
