@@ -42,7 +42,10 @@ FIELD_GROUPS = [
         "property_location_type", "property_municipality", "property_county",
         "property_address", "property_parcel_ids", "property_legal_description",
     ]),
-    ("Financial", "purchase price, payment method, earnest money", [
+    ("Financial", "purchase price, payment method, earnest money. "
+     "purchase_price_words and purchase_price_number are the SAME value in different formats — "
+     "fill BOTH from a single price (words = spelled out, number = formatted). "
+     "Same for earnest_money_words and earnest_money_number", [
         "purchase_price_words", "purchase_price_number",
         "payment_cash", "payment_mortgage", "payment_land_contract",
         "lc_down_payment", "lc_balance", "lc_interest_rate",
@@ -75,6 +78,14 @@ FIELD_GROUPS = [
 
 # Flat list derived from groups — single source of truth
 ALL_VARIABLE_FIELDS = [f for _, _, fields in FIELD_GROUPS for f in fields]
+
+# Paired fields: when both are missing, display as a single item.
+# Maps (words_field, number_field) → display label used in remaining list.
+DISPLAY_PAIRS = {
+    ("purchase_price_words", "purchase_price_number"): "Purchase Price",
+    ("earnest_money_words", "earnest_money_number"): "Earnest Money",
+    ("closing_days", "closing_days_words"): "Closing Days",
+}
 
 
 def _format_fields_for_llm() -> str:
@@ -348,6 +359,12 @@ def format_remaining_variables(variables: dict) -> str:
         Formatted string listing missing variables grouped by section.
         Empty string if all are filled.
     """
+    # Build set of paired fields for collapsing
+    paired_fields = {}  # field → (partner_field, display_label)
+    for (f1, f2), label in DISPLAY_PAIRS.items():
+        paired_fields[f1] = (f2, label)
+        paired_fields[f2] = (f1, label)
+
     sections = []
     for group_name, group_desc, fields in FIELD_GROUPS:
         missing = [f for f in fields if not variables.get(f)]
@@ -359,7 +376,17 @@ def format_remaining_variables(variables: dict) -> str:
         else:
             header = f"**{group_name}:**"
         lines = [header]
+        already_shown = set()
         for field in missing:
+            if field in already_shown:
+                continue
+            if field in paired_fields:
+                partner, pair_label = paired_fields[field]
+                if partner in missing:
+                    # Both missing — show as single item
+                    lines.append(f"- {pair_label}")
+                    already_shown.add(partner)
+                    continue
             label = _strip_group_prefix(field, group_name)
             lines.append(f"- {label}")
         sections.append("\n".join(lines))
