@@ -49,21 +49,52 @@ def _normalize_entity(entity: dict) -> dict:
     return out
 
 
+_MONTH_NAMES = {
+    "1": "January", "01": "January", "2": "February", "02": "February",
+    "3": "March", "03": "March", "4": "April", "04": "April",
+    "5": "May", "05": "May", "6": "June", "06": "June",
+    "7": "July", "07": "July", "8": "August", "08": "August",
+    "9": "September", "09": "September", "10": "October",
+    "11": "November", "12": "December",
+}
+
+
+def _ordinal(n: str) -> str:
+    """Convert a day number string to ordinal (e.g., '10' → '10th')."""
+    n = n.strip().rstrip("stndrdth")
+    try:
+        num = int(n)
+    except ValueError:
+        return n
+    if 11 <= (num % 100) <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(num % 10, "th")
+    return f"{num}{suffix}"
+
+
 def _build_context(variables: dict) -> dict:
     """Build the template context from user-provided variables.
 
     - Missing/None string values default to ``""``
     - Missing/None bool values default to ``False``
     - Missing/None list values default to ``[]``
+    - Effective date day → ordinal, month → full name
     - All other provided values are passed through as-is
     """
     ctx = {}
 
     for key, value in variables.items():
         if value is None:
-            # Treat None same as missing — will be defaulted below
             continue
         ctx[key] = value
+
+    # Normalize effective date formats
+    if "effective_date_day" in ctx:
+        ctx["effective_date_day"] = _ordinal(str(ctx["effective_date_day"]))
+    if "effective_date_month" in ctx:
+        month = str(ctx["effective_date_month"]).strip()
+        ctx["effective_date_month"] = _MONTH_NAMES.get(month, month)
 
     # Default booleans
     for field in _BOOL_FIELDS:

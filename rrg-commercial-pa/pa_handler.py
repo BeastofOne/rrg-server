@@ -19,7 +19,9 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 FIELD_GROUPS = [
-    ("Effective Date", "date the agreement takes effect", [
+    ("Effective Date", "date the agreement takes effect. "
+     "effective_date_day must be ordinal (e.g. '10th', '1st', '23rd'). "
+     "effective_date_month must be the full month name (e.g. 'March', not '3' or '03')", [
         "effective_date_day", "effective_date_month", "effective_date_year",
     ]),
     ("Purchaser", "the buying entity", [
