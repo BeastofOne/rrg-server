@@ -1,6 +1,8 @@
 """RRG Router — Streamlit chat UI with worker node orchestration."""
 
+import base64
 import streamlit as st
+import streamlit.components.v1 as components
 from graph import build_graph
 from node_client import WorkerNodeClient
 from windmill_client import WindmillClient
@@ -202,48 +204,53 @@ with chat_tab:
             msg_entry["docx_filename"] = response_data.get("docx_filename", "output.docx")
         st.session_state.messages.append(msg_entry)
 
-# Generate / Download Preview — no chat messages
+# Generate Preview — one click: generate + auto-download
 with chat_tab:
     if (
         st.session_state.active_node in ("commercial_pa", "pnl", "brochure")
         and st.session_state.messages
         and not (st.session_state.messages[-1].get("pdf_bytes") or st.session_state.messages[-1].get("docx_bytes"))
     ):
+        # Auto-download on rerun after generation
         if st.session_state.preview_data:
-            # Preview ready — show download button directly
             pdata = st.session_state.preview_data
             mime = (
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 if pdata["filename"].endswith(".docx") else "application/pdf"
             )
-            st.download_button(
-                label="Download Preview",
-                data=pdata["bytes"],
-                file_name=pdata["filename"],
-                mime=mime,
-                key="direct_preview_dl",
+            b64 = base64.b64encode(pdata["bytes"]).decode()
+            components.html(
+                f"""<script>
+                var a = document.createElement('a');
+                a.href = 'data:{mime};base64,{b64}';
+                a.download = '{pdata["filename"]}';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                </script>""",
+                height=0,
             )
-        else:
-            # No preview yet — generate on click
-            if st.button("Generate Preview", key="gen_preview_bottom"):
-                with st.spinner("Generating preview..."):
-                    history = [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.messages[-20:]
-                    ]
-                    preview_resp = client.call_worker(
-                        handler_name=st.session_state.active_node,
-                        command="continue",
-                        user_message="preview",
-                        chat_history=history,
-                        state=st.session_state.worker_state,
-                    )
-                    st.session_state.worker_state = preview_resp.get("state", st.session_state.worker_state)
-                    file_bytes = preview_resp.get("pdf_bytes") or preview_resp.get("docx_bytes")
-                    file_name = preview_resp.get("pdf_filename") or preview_resp.get("docx_filename") or "output"
-                    if file_bytes:
-                        st.session_state.preview_data = {"bytes": file_bytes, "filename": file_name}
-                        st.rerun()
+            st.session_state.preview_data = None
+
+        if st.button("Generate Preview", key="gen_preview_bottom"):
+            with st.spinner("Generating preview..."):
+                history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages[-20:]
+                ]
+                preview_resp = client.call_worker(
+                    handler_name=st.session_state.active_node,
+                    command="continue",
+                    user_message="preview",
+                    chat_history=history,
+                    state=st.session_state.worker_state,
+                )
+                st.session_state.worker_state = preview_resp.get("state", st.session_state.worker_state)
+                file_bytes = preview_resp.get("pdf_bytes") or preview_resp.get("docx_bytes")
+                file_name = preview_resp.get("pdf_filename") or preview_resp.get("docx_filename") or "output"
+                if file_bytes:
+                    st.session_state.preview_data = {"bytes": file_bytes, "filename": file_name}
+                    st.rerun()
 
 
 with signals_tab:
