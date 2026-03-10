@@ -84,6 +84,16 @@ with chat_tab:
                     key=f"file_{idx}",
                 )
 
+    # Show Generate Preview button after the last message when a worker is active
+    if (
+        st.session_state.active_node in ("commercial_pa", "pnl", "brochure")
+        and st.session_state.messages
+        and not (st.session_state.messages[-1].get("pdf_bytes") or st.session_state.messages[-1].get("docx_bytes"))
+    ):
+        if st.button("Generate Preview", key="gen_preview_persistent"):
+            st.session_state.pending_action = "preview"
+            st.rerun()
+
 # Chat input at module level — pins to bottom of viewport across all tabs
 prompt = st.chat_input("What can I help with?")
 
@@ -184,15 +194,6 @@ with chat_tab:
                     mime=mime,
                 )
 
-            # Show Generate Preview button for active document workers
-            if (
-                not file_bytes
-                and response_data.get("active", False)
-                and st.session_state.active_node in ("commercial_pa", "pnl", "brochure")
-            ):
-                if st.button("Generate Preview", key="gen_preview"):
-                    st.session_state.pending_action = "preview"
-                    st.rerun()
 
         # Update session state from worker response
         st.session_state.worker_state = response_data.get("state", {})
