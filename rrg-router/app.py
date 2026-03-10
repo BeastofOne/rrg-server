@@ -29,8 +29,8 @@ if "worker_state" not in st.session_state:
 if "debug_data" not in st.session_state:
     st.session_state.debug_data = {}
 
-if "pending_action" not in st.session_state:
-    st.session_state.pending_action = None
+if "preview_data" not in st.session_state:
+    st.session_state.preview_data = None  # {"bytes": ..., "filename": ...}
 
 
 # ---------------------------------------------------------------------------
@@ -88,13 +88,11 @@ with chat_tab:
 # Chat input at module level — pins to bottom of viewport across all tabs
 prompt = st.chat_input("What can I help with?")
 
-# Handle pending actions (e.g., preview button click)
-if not prompt and st.session_state.pending_action:
-    prompt = st.session_state.pending_action
-    st.session_state.pending_action = None
-
 with chat_tab:
     if prompt:
+        # Clear stale preview when user sends a new message
+        st.session_state.preview_data = None
+
         # Show user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -204,16 +202,48 @@ with chat_tab:
             msg_entry["docx_filename"] = response_data.get("docx_filename", "output.docx")
         st.session_state.messages.append(msg_entry)
 
-# Generate Preview button — rendered AFTER all messages (history + new response)
+# Generate / Download Preview — no chat messages
 with chat_tab:
     if (
         st.session_state.active_node in ("commercial_pa", "pnl", "brochure")
         and st.session_state.messages
         and not (st.session_state.messages[-1].get("pdf_bytes") or st.session_state.messages[-1].get("docx_bytes"))
     ):
-        if st.button("Generate Preview", key="gen_preview_bottom"):
-            st.session_state.pending_action = "preview"
-            st.rerun()
+        if st.session_state.preview_data:
+            # Preview ready — show download button directly
+            pdata = st.session_state.preview_data
+            mime = (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                if pdata["filename"].endswith(".docx") else "application/pdf"
+            )
+            st.download_button(
+                label="Download Preview",
+                data=pdata["bytes"],
+                file_name=pdata["filename"],
+                mime=mime,
+                key="direct_preview_dl",
+            )
+        else:
+            # No preview yet — generate on click
+            if st.button("Generate Preview", key="gen_preview_bottom"):
+                with st.spinner("Generating preview..."):
+                    history = [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in st.session_state.messages[-20:]
+                    ]
+                    preview_resp = client.call_worker(
+                        handler_name=st.session_state.active_node,
+                        command="continue",
+                        user_message="preview",
+                        chat_history=history,
+                        state=st.session_state.worker_state,
+                    )
+                    st.session_state.worker_state = preview_resp.get("state", st.session_state.worker_state)
+                    file_bytes = preview_resp.get("pdf_bytes") or preview_resp.get("docx_bytes")
+                    file_name = preview_resp.get("pdf_filename") or preview_resp.get("docx_filename") or "output"
+                    if file_bytes:
+                        st.session_state.preview_data = {"bytes": file_bytes, "filename": file_name}
+                        st.rerun()
 
 
 with signals_tab:
