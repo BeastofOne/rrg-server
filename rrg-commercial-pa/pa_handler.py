@@ -294,7 +294,7 @@ def format_remaining_variables(variables: dict) -> str:
     """
     missing = []
     for field in ALL_VARIABLE_FIELDS:
-        if field not in variables or variables[field] is None:
+        if not variables.get(field):
             missing.append(field)
 
     if not missing:

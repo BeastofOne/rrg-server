@@ -287,15 +287,17 @@ def edit_node(state: PaState) -> dict:
             state.get("chat_history"),
         )
         if isinstance(updated, dict):
+            # Strip empty strings — they mean "not filled", not a real value
+            updated = {k: v for k, v in updated.items() if v}
             store.update_draft(draft_id, updated)
             variables = updated
     except Exception as exc:
         logger.warning("apply_changes failed: %s", exc)
 
-    # Show what changed
+    # Show what changed (only real values, not empty/None)
     changed = {}
     for k, v in variables.items():
-        if v is not None and (k not in old_variables or old_variables.get(k) != v):
+        if v and (k not in old_variables or old_variables.get(k) != v):
             changed[k] = v
 
     response_parts = []
