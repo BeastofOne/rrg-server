@@ -456,15 +456,19 @@ class TestConditionalExhibitA:
             assert "as described in Exhibit A" in doc_xml
 
     def test_exhibit_a_table_has_six_columns(self, complete_variables, sample_exhibit_a):
-        """Exhibit A table should have 6 columns including Municipality and County."""
+        """Exhibit A table should have 6 address-focused columns."""
         variables = {**complete_variables}
         variables["exhibit_a_entities"] = sample_exhibit_a
         result = generate_pa_docx(variables)
         buf = io.BytesIO(result)
         with zipfile.ZipFile(buf) as zf:
             doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "Address" in doc_xml
             assert "Municipality" in doc_xml
             assert "County" in doc_xml
+            assert "Parcel ID(s)" in doc_xml
+            assert "Owner(s)" in doc_xml
+            assert "Legal Description(s)" in doc_xml
 
     def test_exhibit_a_municipality_county_rendered(self, complete_variables):
         """Municipality and county values should appear in entity data."""
@@ -495,6 +499,60 @@ class TestConditionalExhibitA:
         with zipfile.ZipFile(buf) as zf:
             doc_xml = zf.read("word/document.xml").decode("utf-8")
             assert "as described in Exhibit A" not in doc_xml
+
+
+# ===========================================================================
+# Exhibit A — Address-Focused Columns
+# ===========================================================================
+
+class TestExhibitANewColumns:
+    """Tests for the redesigned address-focused Exhibit A table."""
+
+    def test_new_column_headers_present(self, complete_variables, sample_exhibit_a):
+        variables = {**complete_variables, "exhibit_a_entities": sample_exhibit_a}
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "Parcel ID(s)" in doc_xml
+            assert "Owner(s)" in doc_xml
+            assert "Legal Description(s)" in doc_xml
+
+    def test_multi_parcel_same_address_renders_once(self, complete_variables):
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "Lot 1"},
+            {"name": "LLC B", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "002", "legal_description": "Lot 2"},
+            {"name": "LLC C", "address": "200 Oak", "municipality": "Troy",
+             "county": "Oakland", "parcel_ids": "003", "legal_description": "Lot 3"},
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "100 Main" in doc_xml
+            assert "200 Oak" in doc_xml
+            assert "LLC A" in doc_xml
+            assert "LLC B" in doc_xml
+            assert "LLC C" in doc_xml
+
+    def test_bullet_character_in_multi_value(self, complete_variables):
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "Lot 1"},
+            {"name": "LLC B", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "002", "legal_description": "Lot 2"},
+            {"name": "LLC C", "address": "200 Oak", "municipality": "Troy",
+             "county": "Oakland", "parcel_ids": "003", "legal_description": "Lot 3"},
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "\u2022" in doc_xml
 
 
 # ===========================================================================
