@@ -106,8 +106,16 @@ When previewed or finalized, `docx_bytes` contains base64 .docx data. On finaliz
 ## DOCX Generation
 `pa_docx.py`: `generate_pa_docx(variables) → bytes`
 - docxtpl renders `templates/commercial_pa.docx` with ~70 Jinja2 template variables
-- Supports loops (exhibit_a_entities, additional_provisions) and conditionals (checkboxes)
+- Supports loops (exhibit_a_properties, additional_provisions) and conditionals (checkboxes)
 - Filename: `YYYYMMDD_Commercial_PA_<address>.docx`
+
+### Exhibit A (address-focused)
+- Flat entities (one per parcel) grouped by address at render time
+- Table columns: Address | Municipality | County | Parcel ID(s) | Owner(s) | Legal Description(s)
+- Multi-value cells use `RichText` with `\a` paragraph breaks and bullet points
+- Shared `exhibit_a_helpers.py` provides `exhibit_a_active()`, `exhibit_a_multi_owner()`, `normalize_address()` — used by `pa_docx.py`, `pa_handler.py`, and `draft_store.py`
+- Exhibit A activates on 2+ distinct addresses (not entity count)
+- Template XML must be edited via string replacement + zipfile, NOT ElementTree (strips namespace prefixes)
 
 ## Tech
 - **Language:** Python
