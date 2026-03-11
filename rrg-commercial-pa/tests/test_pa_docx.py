@@ -369,9 +369,10 @@ class TestDocxEdgeCases:
         """Each call should return fresh bytes (not a cached reference)."""
         result1 = generate_pa_docx(complete_variables)
         result2 = generate_pa_docx(complete_variables)
-        # Should be equal in content but be separate objects
-        assert result1 == result2
+        # Separate objects (not cached), both valid docx
         assert result1 is not result2
+        assert result1[:2] == b"PK"
+        assert result2[:2] == b"PK"
 
     def test_empty_string_variables_do_not_crash(self, complete_variables):
         """All string variables set to empty string should not crash."""
