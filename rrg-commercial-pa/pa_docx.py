@@ -9,7 +9,11 @@ import os
 
 from docxtpl import DocxTemplate, RichText
 
-from exhibit_a_helpers import normalize_address
+from exhibit_a_helpers import (
+    normalize_address,
+    exhibit_a_active,
+    exhibit_a_multi_owner,
+)
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "commercial_pa.docx")
 
