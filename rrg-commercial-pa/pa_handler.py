@@ -89,6 +89,31 @@ DISPLAY_PAIRS = {
     ("closing_days", "closing_days_words"): "Closing Days",
 }
 
+# Fields covered by Exhibit A when active (2+ entities)
+EXHIBIT_A_PROPERTY_FIELDS = frozenset({
+    "property_address", "property_parcel_ids", "property_legal_description",
+    "property_municipality", "property_county", "property_location_type",
+})
+EXHIBIT_A_SELLER_FIELDS = frozenset({
+    "seller_name", "seller_address", "seller_entity_type",
+})
+
+
+def _exhibit_a_active(variables: dict) -> bool:
+    """Return True if Exhibit A is active (2+ entities)."""
+    entities = variables.get("exhibit_a_entities", [])
+    return isinstance(entities, list) and len(entities) >= 2
+
+
+def _exhibit_a_multi_seller(variables: dict) -> bool:
+    """Return True if Exhibit A has multiple distinct LLC names."""
+    entities = variables.get("exhibit_a_entities", [])
+    if not isinstance(entities, list) or len(entities) < 2:
+        return False
+    names = {e.get("name", "").strip() for e in entities if isinstance(e, dict)}
+    names.discard("")
+    return len(names) > 1
+
 
 def _format_fields_for_llm() -> str:
     """Format field groups for LLM prompts with descriptions."""
@@ -163,9 +188,14 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
         "Purchaser Copy and Seller Copy are for SEPARATE contacts (e.g. attorneys), "
         "not copies of the purchaser/seller info. "
         "Signer information (who signs the document) has no variable — ignore it.\n\n"
-        "Also extract 'exhibit_a_entities' (list of entity dicts with name, address, "
-        "parcel_ids, legal_descriptions) and 'additional_provisions' (list of dicts "
-        "with title and body) if mentioned.\n\n"
+        "Also extract 'exhibit_a_entities' (list of entity dicts with keys: "
+        "name, address, municipality, county, parcel_ids, legal_description) "
+        "and 'additional_provisions' (list of dicts with title and body) if mentioned.\n"
+        "Create one entity per property. If the same LLC owns multiple properties, "
+        "repeat the LLC name in each entity. When exhibit_a_entities has 2+ entries, "
+        "do NOT set scalar property fields (property_address, property_parcel_ids, etc). "
+        "When multiple distinct LLC names exist, do NOT set scalar seller fields "
+        "(seller_name, seller_address, seller_entity_type).\n\n"
     )
 
     if existing_data:
@@ -221,6 +251,13 @@ def apply_changes(
         "Purchaser Copy and Seller Copy are for SEPARATE contacts (e.g. attorneys), "
         "not copies of the purchaser/seller info. "
         "Signer information (who signs the document) has no variable — ignore it.\n\n"
+        "The 'exhibit_a_entities' field is a list of entity dicts with keys: "
+        "name, address, municipality, county, parcel_ids, legal_description. "
+        "Create one entity per property. If adding/removing/editing entities, "
+        "return the complete updated list. When exhibit_a_entities has 2+ entries, "
+        "do NOT set scalar property fields. When multiple distinct LLC names, "
+        "do NOT set scalar seller fields. If user switches from multiple to single "
+        "property, clear exhibit_a_entities (set to []) and use scalar fields.\n\n"
         f"Current variables: {json.dumps(existing_data)}\n\n"
     )
 
@@ -361,6 +398,13 @@ def format_remaining_variables(variables: dict) -> str:
         Formatted string listing missing variables grouped by section.
         Empty string if all are filled.
     """
+    # Determine which fields are covered by Exhibit A
+    skip_fields = set()
+    if _exhibit_a_active(variables):
+        skip_fields |= EXHIBIT_A_PROPERTY_FIELDS
+        if _exhibit_a_multi_seller(variables):
+            skip_fields |= EXHIBIT_A_SELLER_FIELDS
+
     # Build set of paired fields for collapsing
     paired_fields = {}  # field → (partner_field, display_label)
     for (f1, f2), label in DISPLAY_PAIRS.items():
@@ -369,7 +413,7 @@ def format_remaining_variables(variables: dict) -> str:
 
     sections = []
     for group_name, group_desc, fields in FIELD_GROUPS:
-        missing = [f for f in fields if not variables.get(f)]
+        missing = [f for f in fields if f not in skip_fields and not variables.get(f)]
         if not missing:
             continue
         # Short description for copy groups to help the user
@@ -438,3 +482,45 @@ def format_filled_summary(extracted: dict) -> str:
         sections.append("\n".join(lines))
 
     return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# format_exhibit_a_summary (pure — no LLM)
+# ---------------------------------------------------------------------------
+
+def format_exhibit_a_summary(variables: dict) -> str:
+    """Format Exhibit A entity data for display in conversation.
+
+    Returns empty string if Exhibit A is not active.
+    """
+    if not _exhibit_a_active(variables):
+        return ""
+
+    entities = variables.get("exhibit_a_entities", [])
+    lines = [f"**Exhibit A** ({len(entities)} entities):"]
+    for i, entity in enumerate(entities, 1):
+        if not isinstance(entity, dict):
+            continue
+        name = entity.get("name", "Unknown")
+        addr = entity.get("address", "")
+        municipality = entity.get("municipality", "")
+        county = entity.get("county", "")
+        parcel = entity.get("parcel_ids", "")
+        legal = entity.get("legal_description", entity.get("legal_descriptions", ""))
+        parts = [f"  {i}. **{name}**"]
+        if addr:
+            parts.append(f"     Address: {addr}")
+        if municipality or county:
+            loc_parts = []
+            if municipality:
+                loc_parts.append(municipality)
+            if county:
+                loc_parts.append(f"{county} County")
+            parts.append(f"     Location: {', '.join(loc_parts)}")
+        if parcel:
+            parts.append(f"     Parcels: {parcel}")
+        if legal:
+            parts.append(f"     Legal: {legal}")
+        lines.append("\n".join(parts))
+
+    return "\n".join(lines)
