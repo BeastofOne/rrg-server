@@ -469,3 +469,138 @@ class TestHandlerEdgeCases:
         with patch(PATCH_TARGET, return_value=mock_llm):
             result = apply_changes(existing, "The seller is Downtown Inc")
         assert result["seller_name"] == "Downtown Inc"
+
+
+# ===========================================================================
+# Exhibit A — remaining variables with Exhibit A active
+# ===========================================================================
+
+class TestRemainingVariablesWithExhibitA:
+    """Tests for format_remaining_variables when Exhibit A is active."""
+
+    def test_exhibit_a_skips_property_fields(self):
+        """With 2+ entities, property fields should be skipped."""
+        from pa_handler import format_remaining_variables
+
+        variables = {
+            "purchaser_name": "Buyer LLC",
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main"},
+                {"name": "LLC A", "address": "200 Main"},
+            ],
+        }
+        result = format_remaining_variables(variables)
+        # Property fields should NOT appear in remaining
+        assert "Property Address" not in result
+        assert "Parcel" not in result
+        assert "Legal Description" not in result
+        assert "Municipality" not in result
+        assert "County" not in result
+        assert "Location Type" not in result
+
+    def test_exhibit_a_multi_llc_skips_seller_fields(self):
+        """With multiple LLCs, seller name/address/entity_type should be skipped."""
+        from pa_handler import format_remaining_variables
+
+        variables = {
+            "purchaser_name": "Buyer LLC",
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main"},
+                {"name": "LLC B", "address": "200 Main"},
+            ],
+        }
+        result = format_remaining_variables(variables)
+        # Seller section may still appear (for phone/email/fax) but should NOT
+        # list Name, Address, or Entity Type
+        if "**Seller:**" in result:
+            seller_section = result.split("**Seller:**")[1].split("\n\n")[0]
+            assert "- Name" not in seller_section
+            assert "- Address" not in seller_section
+            assert "- Entity Type" not in seller_section
+
+    def test_exhibit_a_single_llc_keeps_seller_fields(self):
+        """With same LLC name, seller fields should still appear if missing."""
+        from pa_handler import format_remaining_variables
+
+        variables = {
+            "purchaser_name": "Buyer LLC",
+            "exhibit_a_entities": [
+                {"name": "Same LLC", "address": "100 Main"},
+                {"name": "Same LLC", "address": "200 Main"},
+            ],
+        }
+        result = format_remaining_variables(variables)
+        # Seller section should still appear (seller fields not filled)
+        assert "Seller" in result
+
+    def test_no_exhibit_a_shows_all_fields(self):
+        """Without Exhibit A, all property and seller fields should appear."""
+        from pa_handler import format_remaining_variables
+
+        variables = {"purchaser_name": "Buyer LLC"}
+        result = format_remaining_variables(variables)
+        assert "Seller" in result
+        assert "Property" in result
+
+
+# ===========================================================================
+# format_exhibit_a_summary
+# ===========================================================================
+
+class TestFormatExhibitASummary:
+    """Tests for Exhibit A summary display."""
+
+    def test_no_entities_returns_empty(self):
+        """No entities should return empty string."""
+        from pa_handler import format_exhibit_a_summary
+
+        result = format_exhibit_a_summary({})
+        assert result == ""
+
+    def test_single_entity_returns_empty(self):
+        """Single entity should return empty (Exhibit A not active)."""
+        from pa_handler import format_exhibit_a_summary
+
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main"},
+            ],
+        }
+        result = format_exhibit_a_summary(variables)
+        assert result == ""
+
+    def test_two_entities_returns_summary(self):
+        """Two entities should return a formatted summary."""
+        from pa_handler import format_exhibit_a_summary
+
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+                 "county": "Oakland", "parcel_ids": "001"},
+                {"name": "LLC B", "address": "200 Main", "municipality": "Troy",
+                 "county": "Oakland", "parcel_ids": "002"},
+            ],
+        }
+        result = format_exhibit_a_summary(variables)
+        assert "Exhibit A" in result
+        assert "2 entities" in result
+        assert "LLC A" in result
+        assert "LLC B" in result
+        assert "Pontiac" in result
+        assert "Troy" in result
+
+    def test_summary_includes_municipality_county(self):
+        """Summary should show municipality and county."""
+        from pa_handler import format_exhibit_a_summary
+
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main",
+                 "municipality": "Ann Arbor", "county": "Washtenaw"},
+                {"name": "LLC B", "address": "200 Main",
+                 "municipality": "Ypsilanti", "county": "Washtenaw"},
+            ],
+        }
+        result = format_exhibit_a_summary(variables)
+        assert "Ann Arbor" in result
+        assert "Washtenaw" in result

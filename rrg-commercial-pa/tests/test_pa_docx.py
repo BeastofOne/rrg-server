@@ -384,3 +384,99 @@ class TestDocxEdgeCases:
         result = generate_pa_docx(variables)
         assert result is not None
         assert result[:2] == b"PK"
+
+
+# ===========================================================================
+# Conditional Exhibit A Rendering
+# ===========================================================================
+
+class TestConditionalExhibitA:
+    """Tests for conditional seller intro and property description based on Exhibit A."""
+
+    def test_single_seller_inline(self, complete_variables):
+        """With no Exhibit A entities, seller and property should be inline."""
+        variables = {**complete_variables}
+        variables.pop("exhibit_a_entities", None)
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Seller name should appear inline in the opening paragraph
+            assert "Downtown Properties Inc" in doc_xml
+            assert "a Michigan corporation" in doc_xml
+            # Property location should be inline
+            assert "Pontiac" in doc_xml
+            assert "Oakland" in doc_xml
+            # Should NOT say "as described in Exhibit A"
+            assert "as described in Exhibit A" not in doc_xml
+
+    def test_multi_llc_exhibit_a_seller_reference(self, complete_variables, sample_exhibit_a):
+        """With multiple distinct LLCs, seller intro should reference Exhibit A."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = sample_exhibit_a
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "those entities set forth in Exhibit A" in doc_xml
+            assert "as described in Exhibit A" in doc_xml
+
+    def test_same_llc_multi_property_seller_inline(self, complete_variables):
+        """Same LLC with multiple properties: seller inline, property references Exhibit A."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {"name": "Same LLC", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "Lot 1"},
+            {"name": "Same LLC", "address": "200 Main", "municipality": "Troy",
+             "county": "Oakland", "parcel_ids": "002", "legal_description": "Lot 2"},
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Seller should be inline (single LLC)
+            assert "Downtown Properties Inc" in doc_xml
+            assert "those entities set forth in Exhibit A" not in doc_xml
+            # Property should reference Exhibit A
+            assert "as described in Exhibit A" in doc_xml
+
+    def test_exhibit_a_table_has_six_columns(self, complete_variables, sample_exhibit_a):
+        """Exhibit A table should have 6 columns including Municipality and County."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = sample_exhibit_a
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "Municipality" in doc_xml
+            assert "County" in doc_xml
+
+    def test_exhibit_a_municipality_county_rendered(self, complete_variables):
+        """Municipality and county values should appear in entity data."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {"name": "LLC A", "address": "100 Main", "municipality": "Ann Arbor",
+             "county": "Washtenaw", "parcel_ids": "001", "legal_description": "Lot 1"},
+            {"name": "LLC B", "address": "200 Main", "municipality": "Ypsilanti",
+             "county": "Washtenaw", "parcel_ids": "002", "legal_description": "Lot 2"},
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "Ann Arbor" in doc_xml
+            assert "Ypsilanti" in doc_xml
+            assert "Washtenaw" in doc_xml
+
+    def test_single_entity_no_exhibit_a(self, complete_variables):
+        """A single entity should NOT trigger Exhibit A mode."""
+        variables = {**complete_variables}
+        variables["exhibit_a_entities"] = [
+            {"name": "Only LLC", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "Lot 1"},
+        ]
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "as described in Exhibit A" not in doc_xml

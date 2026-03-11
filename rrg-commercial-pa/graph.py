@@ -26,6 +26,7 @@ from pa_handler import (
     classify_action,
     format_remaining_variables,
     format_filled_summary,
+    format_exhibit_a_summary,
 )
 from pa_docx import generate_pa_docx
 
@@ -119,10 +120,13 @@ def start_new_node(state: PaState) -> dict:
         variables = draft.get("variables", {})
         filled_summary = format_filled_summary(variables)
         remaining = format_remaining_variables(variables)
+        exhibit_a = format_exhibit_a_summary(variables)
 
         response_parts = [f"Resumed draft for {draft['property_address']}."]
         if filled_summary:
             response_parts.append(f"Variables on file:\n{filled_summary}")
+        if exhibit_a:
+            response_parts.append(exhibit_a)
         if remaining:
             response_parts.append(f"Remaining variables to fill:\n{remaining}")
 
@@ -158,10 +162,13 @@ def start_new_node(state: PaState) -> dict:
     # Build response
     filled_summary = format_filled_summary(initial_vars)
     remaining = format_remaining_variables(initial_vars)
+    exhibit_a = format_exhibit_a_summary(initial_vars)
 
     response_parts = ["New purchase agreement draft created."]
     if filled_summary:
         response_parts.append(f"Got it, here's what I picked up:\n{filled_summary}")
+    if exhibit_a:
+        response_parts.append(exhibit_a)
     if remaining:
         response_parts.append(f"Remaining variables to fill:\n{remaining}")
     else:
@@ -248,10 +255,13 @@ def extract_node(state: PaState) -> dict:
 
     filled_summary = format_filled_summary(extracted if isinstance(extracted, dict) else {})
     remaining = format_remaining_variables(variables)
+    exhibit_a = format_exhibit_a_summary(variables)
 
     response_parts = []
     if filled_summary:
         response_parts.append(filled_summary)
+    if exhibit_a:
+        response_parts.append(exhibit_a)
     if remaining:
         response_parts.append(f"Remaining variables to fill:\n{remaining}")
     if not response_parts:
@@ -320,6 +330,10 @@ def edit_node(state: PaState) -> dict:
         )
     else:
         response_parts.append("No new variables detected — try rephrasing.")
+
+    exhibit_a = format_exhibit_a_summary(variables)
+    if exhibit_a:
+        response_parts.append(exhibit_a)
 
     remaining = format_remaining_variables(variables)
     if remaining:

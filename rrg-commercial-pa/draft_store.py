@@ -58,13 +58,39 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Fields covered by Exhibit A when active
+_EXHIBIT_A_PROPERTY_FIELDS = frozenset({
+    "property_address", "property_parcel_ids", "property_legal_description",
+    "property_municipality", "property_county", "property_location_type",
+})
+_EXHIBIT_A_SELLER_FIELDS = frozenset({
+    "seller_name", "seller_address", "seller_entity_type",
+})
+
+
 def _completion_pct(variables: dict) -> float:
-    """Calculate percentage of ALL_VARIABLE_FIELDS that have non-None values."""
+    """Calculate percentage of ALL_VARIABLE_FIELDS that have non-None values.
+
+    When Exhibit A is active (2+ entities), covered fields count as filled.
+    """
     if not ALL_VARIABLE_FIELDS:
         return 0.0
+
+    # Determine Exhibit A coverage
+    entities = variables.get("exhibit_a_entities", [])
+    exhibit_a_active = isinstance(entities, list) and len(entities) >= 2
+    covered = set()
+    if exhibit_a_active:
+        covered |= _EXHIBIT_A_PROPERTY_FIELDS
+        # Check for multiple distinct LLC names
+        names = {e.get("name", "").strip() for e in entities if isinstance(e, dict)}
+        names.discard("")
+        if len(names) > 1:
+            covered |= _EXHIBIT_A_SELLER_FIELDS
+
     filled = sum(
         1 for field in ALL_VARIABLE_FIELDS
-        if variables.get(field) is not None
+        if field in covered or variables.get(field) is not None
     )
     return round(filled / len(ALL_VARIABLE_FIELDS) * 100, 1)
 
