@@ -105,7 +105,11 @@ def _group_entities_by_address(entities: list[dict]) -> list[dict]:
             g["owners"].append(owner)
         pid = (entity.get("parcel_ids") or entity.get("parcel_id") or "").strip()
         if pid:
-            g["parcel_ids"].append(pid)
+            # Split comma-separated parcel IDs (LLM may bundle multiple in one string)
+            for p in pid.split(","):
+                p = p.strip()
+                if p and p not in g["parcel_ids"]:
+                    g["parcel_ids"].append(p)
         legal = (entity.get("legal_description") or entity.get("legal_descriptions") or "").strip()
         if legal:
             g["legal_descriptions"].append(legal)

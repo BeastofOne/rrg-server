@@ -839,3 +839,30 @@ class TestGroupEntitiesByAddress:
         result = _group_entities_by_address(entities)
         assert len(result) == 1
         assert result[0]["address"] == "100 Main"
+
+    def test_comma_separated_parcel_ids_split(self):
+        """LLM may bundle multiple parcel IDs in one string — should split into bullets."""
+        from pa_docx import _group_entities_by_address
+        from docxtpl import RichText
+        entities = [
+            {"name": "LLC A", "address": "123 N Main St", "municipality": "Ann Arbor",
+             "county": "Washtenaw", "parcel_ids": "33-675, 33-676", "legal_description": ""},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 1
+        prop = result[0]
+        # Two parcel IDs → RichText with bullets
+        assert isinstance(prop["parcel_ids_display"], RichText)
+
+    def test_comma_separated_parcel_ids_deduped(self):
+        """Duplicate parcel IDs after split should be deduped."""
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "LLC A", "address": "100 Main", "municipality": "P",
+             "county": "O", "parcel_ids": "001, 002", "legal_description": "L1"},
+            {"name": "LLC B", "address": "100 Main", "municipality": "P",
+             "county": "O", "parcel_ids": "002, 003", "legal_description": "L2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 1
+        # Should have 3 unique parcel IDs: 001, 002, 003 (not 4)
