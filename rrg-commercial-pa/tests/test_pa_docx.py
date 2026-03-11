@@ -498,6 +498,105 @@ class TestConditionalExhibitA:
 
 
 # ===========================================================================
+# Build Context — Exhibit A integration
+# ===========================================================================
+
+class TestBuildContextExhibitA:
+    """Tests that _build_context produces exhibit_a_properties."""
+
+    def test_two_addresses_produces_exhibit_a_properties(self):
+        from pa_docx import _build_context
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+                 "county": "Oakland", "parcel_ids": "001", "legal_description": "L1"},
+                {"name": "LLC B", "address": "200 Oak", "municipality": "Troy",
+                 "county": "Oakland", "parcel_ids": "002", "legal_description": "L2"},
+            ],
+            "seller_name": "Test Seller",
+        }
+        ctx = _build_context(variables)
+        assert "exhibit_a_properties" in ctx
+        assert len(ctx["exhibit_a_properties"]) == 2
+        assert ctx["use_exhibit_a"] is True
+
+    def test_one_address_no_exhibit_a(self):
+        from pa_docx import _build_context
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+                 "county": "Oakland", "parcel_ids": "001", "legal_description": "L1"},
+            ],
+        }
+        ctx = _build_context(variables)
+        assert ctx["use_exhibit_a"] is False
+
+    def test_two_parcels_same_address_counts_as_one(self):
+        from pa_docx import _build_context
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+                 "county": "Oakland", "parcel_ids": "001", "legal_description": "L1"},
+                {"name": "LLC B", "address": "100 Main", "municipality": "Pontiac",
+                 "county": "Oakland", "parcel_ids": "002", "legal_description": "L2"},
+            ],
+        }
+        ctx = _build_context(variables)
+        assert len(ctx["exhibit_a_properties"]) == 1
+        assert ctx["use_exhibit_a"] is False
+
+    def test_three_addresses_two_with_multi_parcels(self):
+        from pa_docx import _build_context
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "A", "address": "100 Main", "municipality": "P",
+                 "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+                {"name": "B", "address": "100 Main", "municipality": "P",
+                 "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+                {"name": "C", "address": "200 Oak", "municipality": "T",
+                 "county": "O", "parcel_ids": "003", "legal_description": "L3"},
+                {"name": "D", "address": "300 Elm", "municipality": "R",
+                 "county": "W", "parcel_ids": "004", "legal_description": "L4"},
+            ],
+            "seller_name": "Seller",
+        }
+        ctx = _build_context(variables)
+        assert len(ctx["exhibit_a_properties"]) == 3
+        assert ctx["use_exhibit_a"] is True
+
+    def test_multi_owner_seller_intro(self):
+        from pa_docx import _build_context
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "LLC A", "address": "100 Main", "municipality": "P",
+                 "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+                {"name": "LLC B", "address": "200 Oak", "municipality": "T",
+                 "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+            ],
+            "seller_name": "Fallback Seller",
+        }
+        ctx = _build_context(variables)
+        assert "Exhibit A" in ctx["seller_intro"]
+
+    def test_single_owner_multi_address_seller_inline(self):
+        from pa_docx import _build_context
+        variables = {
+            "exhibit_a_entities": [
+                {"name": "Same LLC", "address": "100 Main", "municipality": "P",
+                 "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+                {"name": "Same LLC", "address": "200 Oak", "municipality": "T",
+                 "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+            ],
+            "seller_name": "Same LLC",
+            "seller_entity_type": "a Michigan LLC",
+        }
+        ctx = _build_context(variables)
+        assert ctx["use_exhibit_a"] is True
+        assert "Same LLC" in ctx["seller_intro"]
+        assert "Exhibit A" not in ctx["seller_intro"]
+
+
+# ===========================================================================
 # Exhibit A Helpers (shared module)
 # ===========================================================================
 

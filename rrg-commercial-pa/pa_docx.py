@@ -123,61 +123,45 @@ def _group_entities_by_address(entities: list[dict]) -> list[dict]:
     return result
 
 
-def _apply_exhibit_a_logic(ctx: dict) -> None:
-    """Set seller_intro, seller_address_intro, and use_exhibit_a based on entity count.
+def _set_seller_inline(ctx: dict) -> None:
+    """Set seller_intro and seller_address_intro from scalar seller fields."""
+    seller_name = ctx.get("seller_name", "")
+    seller_entity_type = ctx.get("seller_entity_type", "")
+    if seller_name and seller_entity_type:
+        ctx["seller_intro"] = f"{seller_name}, {seller_entity_type}"
+    elif seller_name:
+        ctx["seller_intro"] = seller_name
+    seller_addr = ctx.get("seller_address", "")
+    if seller_addr:
+        ctx["seller_address_intro"] = f"whose address is {seller_addr}"
+    else:
+        ctx["seller_address_intro"] = ""
 
-    Mutates *ctx* in place.
+
+def _apply_exhibit_a_logic(ctx: dict) -> None:
+    """Set seller_intro, seller_address_intro, and use_exhibit_a.
+
+    Mutates *ctx* in place. Uses grouped address count (not raw entity count).
 
     Rules:
-    - 0-1 entities: seller inline, no Exhibit A
-    - 2+ entities, one distinct LLC name: seller inline, use_exhibit_a = True
-    - 2+ entities, multiple distinct LLC names: seller = Exhibit A ref, use_exhibit_a = True
+    - <2 distinct addresses: seller inline, no Exhibit A
+    - 2+ addresses, one distinct owner: seller inline, use_exhibit_a = True
+    - 2+ addresses, multiple distinct owners: seller = Exhibit A ref, use_exhibit_a = True
     """
     entities = ctx.get("exhibit_a_entities", [])
 
-    if len(entities) < 2:
-        # Single or no entities — inline seller info
-        seller_name = ctx.get("seller_name", "")
-        seller_entity_type = ctx.get("seller_entity_type", "")
-        if seller_name and seller_entity_type:
-            ctx["seller_intro"] = f"{seller_name}, {seller_entity_type}"
-        elif seller_name:
-            ctx["seller_intro"] = seller_name
-        seller_addr = ctx.get("seller_address", "")
-        if seller_addr:
-            ctx["seller_address_intro"] = f"whose address is {seller_addr}"
-        else:
-            ctx["seller_address_intro"] = ""
+    if not exhibit_a_active(entities):
+        _set_seller_inline(ctx)
         ctx["use_exhibit_a"] = False
         return
 
-    # 2+ entities — Exhibit A is active
     ctx["use_exhibit_a"] = True
 
-    # Check if multiple distinct LLC names
-    distinct_names = set()
-    for e in entities:
-        name = e.get("name", "").strip()
-        if name:
-            distinct_names.add(name)
-
-    if len(distinct_names) > 1:
-        # Multiple LLCs — seller references Exhibit A
+    if exhibit_a_multi_owner(entities):
         ctx["seller_intro"] = "those entities set forth in Exhibit A"
         ctx["seller_address_intro"] = "whose addresses are also set forth in Exhibit A"
     else:
-        # Single LLC, multiple properties — seller stays inline
-        seller_name = ctx.get("seller_name", "")
-        seller_entity_type = ctx.get("seller_entity_type", "")
-        if seller_name and seller_entity_type:
-            ctx["seller_intro"] = f"{seller_name}, {seller_entity_type}"
-        elif seller_name:
-            ctx["seller_intro"] = seller_name
-        seller_addr = ctx.get("seller_address", "")
-        if seller_addr:
-            ctx["seller_address_intro"] = f"whose address is {seller_addr}"
-        else:
-            ctx["seller_address_intro"] = ""
+        _set_seller_inline(ctx)
 
 
 _MONTH_NAMES = {
@@ -243,6 +227,11 @@ def _build_context(variables: dict) -> dict:
             _normalize_entity(e) if isinstance(e, dict) else e
             for e in ctx["exhibit_a_entities"]
         ]
+
+    # Group entities by address for Exhibit A rendering
+    ctx["exhibit_a_properties"] = _group_entities_by_address(
+        ctx.get("exhibit_a_entities", [])
+    )
 
     # Set safe fallback defaults before Exhibit A logic
     ctx.setdefault("seller_intro", ctx.get("seller_name", ""))
