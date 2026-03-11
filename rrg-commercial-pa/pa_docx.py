@@ -7,7 +7,9 @@ Produces .docx bytes ready for download or attachment.
 import io
 import os
 
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText
+
+from exhibit_a_helpers import normalize_address
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "commercial_pa.docx")
 
@@ -51,6 +53,70 @@ def _normalize_entity(entity: dict) -> dict:
     out.setdefault("municipality", "")
     out.setdefault("county", "")
     return out
+
+
+def _multi_value_display(values: list[str]):
+    """Return plain string for single value, RichText with bullets for multiple."""
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    rt = RichText()
+    for i, v in enumerate(values):
+        if i > 0:
+            rt.add("\a")
+        rt.add(f"\u2022 {v}")
+    return rt
+
+
+def _group_entities_by_address(entities: list[dict]) -> list[dict]:
+    """Group flat entity dicts by address for Exhibit A rendering.
+
+    Each entity represents one parcel. Entities at the same (normalized)
+    address are grouped into a single row. Multi-value fields become
+    RichText with bullet-point paragraphs; single values stay as strings.
+    Entities with empty/missing addresses are skipped.
+    """
+    from collections import OrderedDict
+
+    groups = OrderedDict()
+
+    for entity in entities:
+        raw_addr = entity.get("address", "")
+        norm = normalize_address(raw_addr)
+        if not norm:
+            continue
+        if norm not in groups:
+            groups[norm] = {
+                "display_addr": raw_addr.strip(),
+                "municipality": entity.get("municipality", ""),
+                "county": entity.get("county", ""),
+                "owners": [],
+                "parcel_ids": [],
+                "legal_descriptions": [],
+            }
+        g = groups[norm]
+        owner = (entity.get("owner") or entity.get("name") or "").strip()
+        if owner and owner not in g["owners"]:
+            g["owners"].append(owner)
+        pid = (entity.get("parcel_ids") or entity.get("parcel_id") or "").strip()
+        if pid:
+            g["parcel_ids"].append(pid)
+        legal = (entity.get("legal_description") or entity.get("legal_descriptions") or "").strip()
+        if legal:
+            g["legal_descriptions"].append(legal)
+
+    result = []
+    for norm, g in groups.items():
+        result.append({
+            "address": g["display_addr"],
+            "municipality": g["municipality"],
+            "county": g["county"],
+            "owners_display": _multi_value_display(g["owners"]),
+            "parcel_ids_display": _multi_value_display(g["parcel_ids"]),
+            "legal_descriptions_display": _multi_value_display(g["legal_descriptions"]),
+        })
+    return result
 
 
 def _apply_exhibit_a_logic(ctx: dict) -> None:

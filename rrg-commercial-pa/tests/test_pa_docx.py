@@ -495,3 +495,190 @@ class TestConditionalExhibitA:
         with zipfile.ZipFile(buf) as zf:
             doc_xml = zf.read("word/document.xml").decode("utf-8")
             assert "as described in Exhibit A" not in doc_xml
+
+
+# ===========================================================================
+# Exhibit A Helpers (shared module)
+# ===========================================================================
+
+class TestExhibitAHelpers:
+    """Tests for shared exhibit_a_helpers functions."""
+
+    def test_normalize_address(self):
+        from exhibit_a_helpers import normalize_address
+        assert normalize_address("  100  Main  St  ") == "100 main st"
+        assert normalize_address("") == ""
+        assert normalize_address(None) == ""
+
+    def test_count_grouped_addresses_basic(self):
+        from exhibit_a_helpers import count_grouped_addresses
+        entities = [{"address": "100 Main"}, {"address": "200 Oak"}]
+        assert count_grouped_addresses(entities) == 2
+
+    def test_count_grouped_addresses_same(self):
+        from exhibit_a_helpers import count_grouped_addresses
+        entities = [{"address": "100 Main"}, {"address": "100 main"}]
+        assert count_grouped_addresses(entities) == 1
+
+    def test_count_grouped_addresses_skips_empty(self):
+        from exhibit_a_helpers import count_grouped_addresses
+        entities = [{"address": ""}, {"address": "100 Main"}]
+        assert count_grouped_addresses(entities) == 1
+
+    def test_count_grouped_addresses_empty_list(self):
+        from exhibit_a_helpers import count_grouped_addresses
+        assert count_grouped_addresses([]) == 0
+
+    def test_get_distinct_owners(self):
+        from exhibit_a_helpers import get_distinct_owners
+        entities = [
+            {"name": "LLC A"},
+            {"owner": "LLC B"},
+            {"name": "LLC A"},
+        ]
+        assert get_distinct_owners(entities) == {"LLC A", "LLC B"}
+
+    def test_get_distinct_owners_prefers_owner_key(self):
+        from exhibit_a_helpers import get_distinct_owners
+        entities = [{"owner": "New Key", "name": "Old Key"}]
+        assert get_distinct_owners(entities) == {"New Key"}
+
+    def test_exhibit_a_active_two_addresses(self):
+        from exhibit_a_helpers import exhibit_a_active
+        entities = [{"address": "100 Main"}, {"address": "200 Oak"}]
+        assert exhibit_a_active(entities) is True
+
+    def test_exhibit_a_active_same_address(self):
+        from exhibit_a_helpers import exhibit_a_active
+        entities = [{"address": "100 Main"}, {"address": "100 Main"}]
+        assert exhibit_a_active(entities) is False
+
+    def test_exhibit_a_multi_owner(self):
+        from exhibit_a_helpers import exhibit_a_multi_owner
+        entities = [
+            {"address": "100 Main", "name": "LLC A"},
+            {"address": "200 Oak", "name": "LLC B"},
+        ]
+        assert exhibit_a_multi_owner(entities) is True
+
+    def test_exhibit_a_multi_owner_same_owner(self):
+        from exhibit_a_helpers import exhibit_a_multi_owner
+        entities = [
+            {"address": "100 Main", "name": "Same LLC"},
+            {"address": "200 Oak", "name": "Same LLC"},
+        ]
+        assert exhibit_a_multi_owner(entities) is False
+
+
+# ===========================================================================
+# Address Grouping (_group_entities_by_address)
+# ===========================================================================
+
+class TestGroupEntitiesByAddress:
+    """Tests for the address-grouping function."""
+
+    def test_single_entity_per_address(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "Lot 1"},
+            {"name": "LLC B", "address": "200 Oak", "municipality": "Troy",
+             "county": "Oakland", "parcel_ids": "002", "legal_description": "Lot 2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 2
+        assert result[0]["address"] == "100 Main"
+        assert isinstance(result[0]["owners_display"], str)
+        assert result[0]["owners_display"] == "LLC A"
+        assert result[0]["parcel_ids_display"] == "001"
+        assert result[0]["legal_descriptions_display"] == "Lot 1"
+
+    def test_multiple_parcels_same_address(self):
+        from pa_docx import _group_entities_by_address
+        from docxtpl import RichText
+        entities = [
+            {"name": "LLC A", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "Lot 1"},
+            {"name": "LLC B", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "002", "legal_description": "Lot 2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 1
+        prop = result[0]
+        assert prop["address"] == "100 Main"
+        assert prop["municipality"] == "Pontiac"
+        assert prop["county"] == "Oakland"
+        assert isinstance(prop["owners_display"], RichText)
+        assert isinstance(prop["parcel_ids_display"], RichText)
+        assert isinstance(prop["legal_descriptions_display"], RichText)
+
+    def test_empty_entities(self):
+        from pa_docx import _group_entities_by_address
+        assert _group_entities_by_address([]) == []
+
+    def test_preserves_address_order(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "A", "address": "200 Oak", "municipality": "Troy",
+             "county": "Oakland", "parcel_ids": "002", "legal_description": "L2"},
+            {"name": "B", "address": "100 Main", "municipality": "Pontiac",
+             "county": "Oakland", "parcel_ids": "001", "legal_description": "L1"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert result[0]["address"] == "200 Oak"
+        assert result[1]["address"] == "100 Main"
+
+    def test_owner_field_backwards_compat(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "Old Format LLC", "address": "100 Main", "municipality": "P",
+             "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert result[0]["owners_display"] == "Old Format LLC"
+
+    def test_deduplicates_owners(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "Same LLC", "address": "100 Main", "municipality": "P",
+             "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+            {"name": "Same LLC", "address": "100 Main", "municipality": "P",
+             "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert isinstance(result[0]["owners_display"], str)
+        assert result[0]["owners_display"] == "Same LLC"
+
+    def test_address_normalization_case(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "LLC A", "address": "100 Main St", "municipality": "P",
+             "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+            {"name": "LLC B", "address": "100 main st", "municipality": "P",
+             "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 1
+
+    def test_address_normalization_whitespace(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "LLC A", "address": "100  Main  St", "municipality": "P",
+             "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+            {"name": "LLC B", "address": "100 Main St", "municipality": "P",
+             "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 1
+
+    def test_empty_address_entities_skipped(self):
+        from pa_docx import _group_entities_by_address
+        entities = [
+            {"name": "LLC A", "address": "", "municipality": "P",
+             "county": "O", "parcel_ids": "001", "legal_description": "L1"},
+            {"name": "LLC B", "address": "100 Main", "municipality": "P",
+             "county": "O", "parcel_ids": "002", "legal_description": "L2"},
+        ]
+        result = _group_entities_by_address(entities)
+        assert len(result) == 1
+        assert result[0]["address"] == "100 Main"
