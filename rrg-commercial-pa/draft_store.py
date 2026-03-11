@@ -10,6 +10,8 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
+from exhibit_a_helpers import exhibit_a_active, exhibit_a_multi_owner
+
 DB_PATH = os.getenv("PA_DB_PATH", "/data/pa_drafts.db")
 
 ALL_VARIABLE_FIELDS = [
@@ -78,14 +80,10 @@ def _completion_pct(variables: dict) -> float:
 
     # Determine Exhibit A coverage
     entities = variables.get("exhibit_a_entities", [])
-    exhibit_a_active = isinstance(entities, list) and len(entities) >= 2
     covered = set()
-    if exhibit_a_active:
+    if exhibit_a_active(entities):
         covered |= _EXHIBIT_A_PROPERTY_FIELDS
-        # Check for multiple distinct LLC names
-        names = {e.get("name", "").strip() for e in entities if isinstance(e, dict)}
-        names.discard("")
-        if len(names) > 1:
+        if exhibit_a_multi_owner(entities):
             covered |= _EXHIBIT_A_SELLER_FIELDS
 
     filled = sum(
