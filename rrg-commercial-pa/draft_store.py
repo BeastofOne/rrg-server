@@ -20,7 +20,8 @@ ALL_VARIABLE_FIELDS = [
     "purchaser_copy_name", "purchaser_copy_address",
     "purchaser_copy_phone", "purchaser_copy_email",
     # Party — Seller
-    "seller_name", "seller_address", "seller_phone", "seller_email",
+    "seller_name", "seller_entity_type", "seller_address",
+    "seller_phone", "seller_email",
     "seller_fax", "seller_copy_name", "seller_copy_address",
     "seller_copy_phone", "seller_copy_email",
     # Property

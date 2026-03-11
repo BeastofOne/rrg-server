@@ -33,8 +33,8 @@ FIELD_GROUPS = [
         "purchaser_copy_phone", "purchaser_copy_email",
     ]),
     ("Seller", "the selling entity", [
-        "seller_name", "seller_address", "seller_phone", "seller_email",
-        "seller_fax",
+        "seller_name", "seller_entity_type", "seller_address",
+        "seller_phone", "seller_email", "seller_fax",
     ]),
     ("Seller Copy", "separate contact who receives copies of notices — NOT the seller", [
         "seller_copy_name", "seller_copy_address",

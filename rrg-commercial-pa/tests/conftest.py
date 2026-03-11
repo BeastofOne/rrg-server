@@ -90,6 +90,7 @@ def complete_variables():
         "purchaser_copy_email": "bob@legalway.com",
         # Party — Seller
         "seller_name": "Downtown Properties Inc",
+        "seller_entity_type": "a Michigan corporation",
         "seller_address": "500 Commerce Blvd, Pontiac, MI 48342",
         "seller_phone": "(248) 555-0500",
         "seller_email": "seller@downtown.com",
@@ -245,7 +246,8 @@ ALL_VARIABLE_FIELDS = [
     "purchaser_copy_name", "purchaser_copy_address",
     "purchaser_copy_phone", "purchaser_copy_email",
     # Party — Seller
-    "seller_name", "seller_address", "seller_phone", "seller_email",
+    "seller_name", "seller_entity_type", "seller_address",
+    "seller_phone", "seller_email",
     "seller_fax", "seller_copy_name", "seller_copy_address",
     "seller_copy_phone", "seller_copy_email",
     # Property

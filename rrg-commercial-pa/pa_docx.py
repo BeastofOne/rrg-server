@@ -41,12 +41,73 @@ def _normalize_entity(entity: dict) -> dict:
 
     The template uses ``entity.legal_description`` (singular) but callers
     may provide ``legal_descriptions`` (plural). This maps the plural key
-    to the singular form expected by the template.
+    to the singular form expected by the template. Also ensures
+    ``municipality`` and ``county`` keys exist.
     """
     out = dict(entity)
     if "legal_descriptions" in out and "legal_description" not in out:
         out["legal_description"] = out.pop("legal_descriptions")
+    # Ensure municipality and county always present
+    out.setdefault("municipality", "")
+    out.setdefault("county", "")
     return out
+
+
+def _apply_exhibit_a_logic(ctx: dict) -> None:
+    """Set seller_intro, seller_address_intro, and use_exhibit_a based on entity count.
+
+    Mutates *ctx* in place.
+
+    Rules:
+    - 0-1 entities: seller inline, no Exhibit A
+    - 2+ entities, one distinct LLC name: seller inline, use_exhibit_a = True
+    - 2+ entities, multiple distinct LLC names: seller = Exhibit A ref, use_exhibit_a = True
+    """
+    entities = ctx.get("exhibit_a_entities", [])
+
+    if len(entities) < 2:
+        # Single or no entities — inline seller info
+        seller_name = ctx.get("seller_name", "")
+        seller_entity_type = ctx.get("seller_entity_type", "")
+        if seller_name and seller_entity_type:
+            ctx["seller_intro"] = f"{seller_name}, {seller_entity_type}"
+        elif seller_name:
+            ctx["seller_intro"] = seller_name
+        seller_addr = ctx.get("seller_address", "")
+        if seller_addr:
+            ctx["seller_address_intro"] = f"whose address is {seller_addr}"
+        else:
+            ctx["seller_address_intro"] = ""
+        ctx["use_exhibit_a"] = False
+        return
+
+    # 2+ entities — Exhibit A is active
+    ctx["use_exhibit_a"] = True
+
+    # Check if multiple distinct LLC names
+    distinct_names = set()
+    for e in entities:
+        name = e.get("name", "").strip()
+        if name:
+            distinct_names.add(name)
+
+    if len(distinct_names) > 1:
+        # Multiple LLCs — seller references Exhibit A
+        ctx["seller_intro"] = "those entities set forth in Exhibit A"
+        ctx["seller_address_intro"] = "whose addresses are also set forth in Exhibit A"
+    else:
+        # Single LLC, multiple properties — seller stays inline
+        seller_name = ctx.get("seller_name", "")
+        seller_entity_type = ctx.get("seller_entity_type", "")
+        if seller_name and seller_entity_type:
+            ctx["seller_intro"] = f"{seller_name}, {seller_entity_type}"
+        elif seller_name:
+            ctx["seller_intro"] = seller_name
+        seller_addr = ctx.get("seller_address", "")
+        if seller_addr:
+            ctx["seller_address_intro"] = f"whose address is {seller_addr}"
+        else:
+            ctx["seller_address_intro"] = ""
 
 
 _MONTH_NAMES = {
@@ -112,6 +173,14 @@ def _build_context(variables: dict) -> dict:
             _normalize_entity(e) if isinstance(e, dict) else e
             for e in ctx["exhibit_a_entities"]
         ]
+
+    # Set safe fallback defaults before Exhibit A logic
+    ctx.setdefault("seller_intro", ctx.get("seller_name", ""))
+    ctx.setdefault("seller_address_intro", f"whose address is {ctx.get('seller_address', '')}" if ctx.get("seller_address") else "")
+    ctx.setdefault("use_exhibit_a", False)
+
+    # Apply conditional Exhibit A logic (overrides defaults above)
+    _apply_exhibit_a_logic(ctx)
 
     return ctx
 
