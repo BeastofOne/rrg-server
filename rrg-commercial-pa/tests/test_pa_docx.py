@@ -159,14 +159,27 @@ class TestExhibitA:
         assert result[:2] == b"PK"
 
     def test_exhibit_a_entity_fields_appear(self, complete_variables):
-        """Entity parcel IDs and legal descriptions should appear in output."""
+        """Entity parcel IDs and legal descriptions should appear in output.
+
+        Exhibit A only renders with 2+ entities, so we need at least two.
+        """
         variables = {**complete_variables}
         variables["exhibit_a_entities"] = [
             {
                 "name": "Test Entity Corp",
                 "address": "999 Test Ave",
+                "municipality": "TestCity",
+                "county": "TestCounty",
                 "parcel_ids": "99-99-999-999",
                 "legal_descriptions": "Unit 42 of Test Subdivision",
+            },
+            {
+                "name": "Test Entity Corp",
+                "address": "888 Other Blvd",
+                "municipality": "OtherCity",
+                "county": "OtherCounty",
+                "parcel_ids": "88-88-888-888",
+                "legal_descriptions": "Unit 99 of Other Subdivision",
             },
         ]
         result = generate_pa_docx(variables)
@@ -175,6 +188,7 @@ class TestExhibitA:
             doc_xml = zf.read("word/document.xml").decode("utf-8")
             assert "99-99-999-999" in doc_xml
             assert "Unit 42 of Test Subdivision" in doc_xml
+            assert "88-88-888-888" in doc_xml
 
 
 # ===========================================================================
