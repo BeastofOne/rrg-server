@@ -53,6 +53,7 @@
         cp ${./draft_store.py} $out/app/draft_store.py
         cp ${./claude_llm.py} $out/app/claude_llm.py
         cp ${./provisions.py} $out/app/provisions.py
+        cp ${./exhibit_a_helpers.py} $out/app/exhibit_a_helpers.py
         cp ${./templates/commercial_pa.docx} $out/app/templates/commercial_pa.docx
       '';
 
