@@ -12,6 +12,8 @@ import json
 import os
 from typing import Optional
 
+from exhibit_a_helpers import exhibit_a_active, exhibit_a_multi_owner
+
 
 # ---------------------------------------------------------------------------
 # Field groups — each group has (name, description, [fields])
@@ -99,20 +101,6 @@ EXHIBIT_A_SELLER_FIELDS = frozenset({
 })
 
 
-def _exhibit_a_active(variables: dict) -> bool:
-    """Return True if Exhibit A is active (2+ entities)."""
-    entities = variables.get("exhibit_a_entities", [])
-    return isinstance(entities, list) and len(entities) >= 2
-
-
-def _exhibit_a_multi_seller(variables: dict) -> bool:
-    """Return True if Exhibit A has multiple distinct LLC names."""
-    entities = variables.get("exhibit_a_entities", [])
-    if not isinstance(entities, list) or len(entities) < 2:
-        return False
-    names = {e.get("name", "").strip() for e in entities if isinstance(e, dict)}
-    names.discard("")
-    return len(names) > 1
 
 
 def _format_fields_for_llm() -> str:
@@ -189,9 +177,11 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
         "not copies of the purchaser/seller info. "
         "Signer information (who signs the document) has no variable — ignore it.\n\n"
         "Also extract 'exhibit_a_entities' (list of entity dicts with keys: "
-        "name, address, municipality, county, parcel_ids, legal_description) "
+        "owner, address, municipality, county, parcel_ids, legal_description) "
         "and 'additional_provisions' (list of dicts with title and body) if mentioned.\n"
-        "Create one entity per property. If the same LLC owns multiple properties, "
+        "Create one entity per parcel. If a property has multiple parcels "
+        "(e.g. building + parking lot on separate parcels), create separate entities "
+        "with the same address. If the same LLC owns multiple properties, "
         "repeat the LLC name in each entity. When exhibit_a_entities has 2+ entries, "
         "do NOT set scalar property fields (property_address, property_parcel_ids, etc). "
         "When multiple distinct LLC names exist, do NOT set scalar seller fields "
@@ -252,8 +242,8 @@ def apply_changes(
         "not copies of the purchaser/seller info. "
         "Signer information (who signs the document) has no variable — ignore it.\n\n"
         "The 'exhibit_a_entities' field is a list of entity dicts with keys: "
-        "name, address, municipality, county, parcel_ids, legal_description. "
-        "Create one entity per property. If adding/removing/editing entities, "
+        "owner, address, municipality, county, parcel_ids, legal_description. "
+        "Create one entity per parcel. If adding/removing/editing entities, "
         "return the complete updated list. When exhibit_a_entities has 2+ entries, "
         "do NOT set scalar property fields. When multiple distinct LLC names, "
         "do NOT set scalar seller fields. If user switches from multiple to single "
@@ -399,10 +389,11 @@ def format_remaining_variables(variables: dict) -> str:
         Empty string if all are filled.
     """
     # Determine which fields are covered by Exhibit A
+    entities = variables.get("exhibit_a_entities", [])
     skip_fields = set()
-    if _exhibit_a_active(variables):
+    if exhibit_a_active(entities):
         skip_fields |= EXHIBIT_A_PROPERTY_FIELDS
-        if _exhibit_a_multi_seller(variables):
+        if exhibit_a_multi_owner(entities):
             skip_fields |= EXHIBIT_A_SELLER_FIELDS
 
     # Build set of paired fields for collapsing
@@ -493,15 +484,14 @@ def format_exhibit_a_summary(variables: dict) -> str:
 
     Returns empty string if Exhibit A is not active.
     """
-    if not _exhibit_a_active(variables):
-        return ""
-
     entities = variables.get("exhibit_a_entities", [])
+    if not exhibit_a_active(entities):
+        return ""
     lines = [f"**Exhibit A** ({len(entities)} entities):"]
     for i, entity in enumerate(entities, 1):
         if not isinstance(entity, dict):
             continue
-        name = entity.get("name", "Unknown")
+        name = entity.get("owner") or entity.get("name", "Unknown")
         addr = entity.get("address", "")
         municipality = entity.get("municipality", "")
         county = entity.get("county", "")
