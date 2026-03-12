@@ -307,8 +307,17 @@ class TestEditNodeContext:
 
         calls = mock_hllm.return_value.invoke.call_args_list
         last_prompt = calls[-1][0][0][0].content
-        assert "exhibit_a_entities" not in last_prompt
-        assert "additional_provisions" not in last_prompt
+        # exhibit_a_entities appears in the base instructions, but should NOT
+        # appear in the "Already known data" context section
+        if "Already known data:" in last_prompt:
+            context_start = last_prompt.index("Already known data:")
+            context_section = last_prompt[context_start:]
+            # Cut at the next double newline (end of context block)
+            end = context_section.find("\n\n")
+            if end != -1:
+                context_section = context_section[:end]
+            assert "exhibit_a_entities" not in context_section
+            assert "additional_provisions" not in context_section
 
     @patch(DOCX_PATCH, return_value=b"PK\x03\x04fake")
     @patch(HANDLER_LLM_PATCH)

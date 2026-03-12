@@ -227,6 +227,10 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
     if existing_data:
         context_lines = []
         for k, v in existing_data.items():
+            if v is None or v == "" or v == []:
+                continue
+            if k in ("exhibit_a_entities", "additional_provisions"):
+                continue
             val_str = str(v)
             if len(val_str) > 100:
                 val_str = val_str[:100] + "..."
