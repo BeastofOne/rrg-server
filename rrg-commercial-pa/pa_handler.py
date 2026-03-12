@@ -202,6 +202,10 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
     if existing_data:
         prompt += f"Already known data: {json.dumps(existing_data)}\n\n"
 
+    from datetime import date
+    today = date.today()
+    prompt += f"Today's date is {today.strftime('%A, %B %d, %Y')}.\n\n"
+
     prompt += (
         f"User message: {user_message}\n\n"
         "Return ONLY a JSON object with the extracted variables. "
