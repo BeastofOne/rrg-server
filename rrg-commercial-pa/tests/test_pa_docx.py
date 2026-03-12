@@ -984,8 +984,8 @@ class TestMixedPaymentMethods:
         assert "Four Hundred Thousand" in doc_xml
         assert "$400,000.00" in doc_xml
 
-    def test_both_selected_pct_empty_falls_back(self, complete_variables):
-        """Both=True, pct fields empty → 'full Purchase Price' still used."""
+    def test_both_selected_pct_empty_shows_blanks(self, complete_variables):
+        """Both=True, pct fields empty → percentage language with blank placeholders."""
         variables = {**complete_variables}
         variables["payment_mortgage"] = True
         variables["payment_land_contract"] = True
@@ -998,16 +998,18 @@ class TestMixedPaymentMethods:
         variables["lc_amortization_years"] = 30
         variables["lc_balloon_months"] = 60
         doc_xml = self._get_doc_xml(variables)
-        # Both clauses should use "full Purchase Price" since pct is empty
+        # Both clauses should NOT use "full Purchase Price" — should use pct language with blanks
         idx_m = doc_xml.find("New Mortgage")
         assert idx_m != -1
         mortgage_area = doc_xml[idx_m:idx_m + 600]
-        assert "full Purchase Price" in mortgage_area
+        assert "full Purchase Price" not in mortgage_area
+        assert "% of the Purchase Price" in mortgage_area
 
         idx_lc = doc_xml.find("Land Contract.")
         assert idx_lc != -1
         lc_area = doc_xml[idx_lc:idx_lc + 600]
-        assert "full Purchase Price" in lc_area
+        assert "full Purchase Price" not in lc_area
+        assert "% of the Purchase Price" in lc_area
 
     def test_all_three_payment_methods_renders(self, complete_variables):
         """Cash+Mortgage+LC all true → doesn't crash."""
