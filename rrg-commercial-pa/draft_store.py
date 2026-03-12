@@ -10,7 +10,10 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
-from exhibit_a_helpers import exhibit_a_active, exhibit_a_multi_owner
+from exhibit_a_helpers import (
+    exhibit_a_active, exhibit_a_multi_owner,
+    compute_payment_excluded_fields,
+)
 
 DB_PATH = os.getenv("PA_DB_PATH", "/data/pa_drafts.db")
 
@@ -72,17 +75,11 @@ _EXHIBIT_A_SELLER_FIELDS = frozenset({
     "seller_name", "seller_address", "seller_entity_type",
 })
 
-_MIXED_PAYMENT_FIELDS = frozenset({
-    "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
-    "lc_pct", "lc_amount_words", "lc_amount_number",
-    "lc_subordinate",
-})
-
-
 def _completion_pct(variables: dict) -> float:
     """Calculate percentage of ALL_VARIABLE_FIELDS that have non-None values.
 
     When Exhibit A is active (2+ entities), covered fields count as filled.
+    Uses shared compute_payment_excluded_fields() for payment method logic.
     """
     if not ALL_VARIABLE_FIELDS:
         return 0.0
@@ -95,11 +92,8 @@ def _completion_pct(variables: dict) -> float:
         if exhibit_a_multi_owner(entities):
             covered |= _EXHIBIT_A_SELLER_FIELDS
 
-    # Exclude mixed-payment fields when both methods aren't selected
-    both_payment = variables.get("payment_mortgage") and variables.get("payment_land_contract")
-    excluded = set()
-    if not both_payment:
-        excluded = _MIXED_PAYMENT_FIELDS
+    # Exclude payment-related fields based on selected methods
+    excluded = compute_payment_excluded_fields(variables)
 
     countable = [f for f in ALL_VARIABLE_FIELDS if f not in excluded]
     if not countable:

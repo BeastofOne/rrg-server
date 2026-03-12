@@ -607,50 +607,183 @@ class TestFormatExhibitASummary:
 
 
 # ===========================================================================
-# Mixed Payment Fields — remaining variables visibility
+# Payment Method Field Visibility
 # ===========================================================================
 
-class TestMixedPaymentFieldsVisibility:
-    """Tests that mixed payment fields are hidden/shown based on payment method selection."""
+class TestPaymentFieldVisibility:
+    """Tests that payment-related fields are hidden/shown based on selected payment methods."""
 
     MIXED_FIELDS = {
         "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
         "lc_pct", "lc_amount_words", "lc_amount_number",
         "lc_subordinate",
     }
+    LC_SUB_FIELDS = {
+        "lc_down_payment", "lc_balance", "lc_interest_rate",
+        "lc_amortization_years", "lc_balloon_months",
+    }
 
-    def test_remaining_hides_mixed_fields_when_mortgage_only(self):
-        """Mortgage=True, LC=False → 6 mixed fields NOT in remaining list."""
+    def _field_visible(self, result: str, field: str) -> bool:
+        """Check if a field name appears in the remaining variables output."""
+        return field.replace("_", " ") in result.lower()
+
+    # --- No payment selected (None/not set) ---
+
+    def test_none_selected_shows_all_payment_booleans(self):
+        """No payment method set → all 3 payment booleans visible."""
         from pa_handler import format_remaining_variables
+        result = format_remaining_variables({})
+        assert "Payment Cash" in result
+        assert "Payment Mortgage" in result
+        assert "Payment Land Contract" in result
 
+    def test_none_selected_shows_lc_sub_fields(self):
+        """No payment method set → LC sub-fields visible."""
+        from pa_handler import format_remaining_variables
+        result = format_remaining_variables({})
+        assert "Down Payment" in result
+        assert "Balance" in result
+
+    def test_none_selected_hides_mixed_fields(self):
+        """No payment method set → mixed fields hidden (structurally irrelevant)."""
+        from pa_handler import format_remaining_variables
+        result = format_remaining_variables({})
+        for field in self.MIXED_FIELDS:
+            assert field not in result.lower(), f"{field} should be hidden when nothing selected"
+
+    # --- Cash only ---
+
+    def test_cash_only_hides_other_booleans(self):
+        """Cash=True → payment_mortgage and payment_land_contract hidden."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_cash": True}
+        result = format_remaining_variables(variables)
+        assert "payment_mortgage" not in result.lower()
+        assert "payment_land_contract" not in result.lower()
+
+    def test_cash_only_hides_lc_sub_fields(self):
+        """Cash=True → all LC sub-fields hidden."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_cash": True}
+        result = format_remaining_variables(variables)
+        for field in self.LC_SUB_FIELDS:
+            assert field not in result.lower(), f"{field} should be hidden with cash only"
+
+    def test_cash_only_hides_mixed_fields(self):
+        """Cash=True → mixed fields hidden."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_cash": True}
+        result = format_remaining_variables(variables)
+        for field in self.MIXED_FIELDS:
+            assert field not in result.lower(), f"{field} should be hidden with cash only"
+
+    # --- Mortgage only ---
+
+    def test_mortgage_only_hides_other_booleans(self):
+        """Mortgage=True → payment_cash and payment_land_contract hidden."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": False}
+        result = format_remaining_variables(variables)
+        assert "payment_cash" not in result.lower()
+        assert "payment_land_contract" not in result.lower()
+
+    def test_mortgage_only_hides_lc_sub_fields(self):
+        """Mortgage=True, LC=False → all LC sub-fields hidden."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": False}
+        result = format_remaining_variables(variables)
+        for field in self.LC_SUB_FIELDS:
+            assert field not in result.lower(), f"{field} should be hidden with mortgage only"
+
+    def test_mortgage_only_hides_mixed_fields(self):
+        """Mortgage=True, LC=False → mixed fields hidden."""
+        from pa_handler import format_remaining_variables
         variables = {"payment_mortgage": True, "payment_land_contract": False}
         result = format_remaining_variables(variables)
         for field in self.MIXED_FIELDS:
-            label = field.replace("_", " ").title()
-            # The field label should NOT appear since it's hidden
-            # Check both the raw field name and common label forms
-            assert field not in result.lower(), f"{field} should be hidden"
+            assert field not in result.lower(), f"{field} should be hidden with mortgage only"
 
-    def test_remaining_shows_mixed_fields_when_both(self):
-        """Both=True → 6 mixed fields appear in remaining list."""
+    # --- Land Contract only ---
+
+    def test_lc_only_hides_other_booleans(self):
+        """LC=True → payment_cash and payment_mortgage hidden."""
         from pa_handler import format_remaining_variables
+        variables = {"payment_land_contract": True, "payment_mortgage": False}
+        result = format_remaining_variables(variables)
+        assert "payment_cash" not in result.lower()
+        assert "payment_mortgage" not in result.lower()
 
+    def test_lc_only_shows_lc_sub_fields(self):
+        """LC=True → LC sub-fields visible."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_land_contract": True, "payment_mortgage": False}
+        result = format_remaining_variables(variables)
+        assert "Down Payment" in result
+        assert "Balance" in result
+
+    def test_lc_only_hides_mixed_fields(self):
+        """LC=True, mortgage=False → mixed fields hidden."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_land_contract": True, "payment_mortgage": False}
+        result = format_remaining_variables(variables)
+        for field in self.MIXED_FIELDS:
+            assert field not in result.lower(), f"{field} should be hidden with LC only"
+
+    # --- Mortgage + Land Contract (mixed mode) ---
+
+    def test_both_hides_cash_boolean(self):
+        """Mortgage+LC → payment_cash hidden."""
+        from pa_handler import format_remaining_variables
         variables = {"payment_mortgage": True, "payment_land_contract": True}
         result = format_remaining_variables(variables)
-        assert "Mortgage Percentage" in result, \
-            f"Mortgage Percentage should appear when both methods selected. Got:\n{result}"
+        assert "payment_cash" not in result.lower()
+
+    def test_both_hides_lc_down_payment(self):
+        """Mortgage+LC → lc_down_payment hidden (mortgage IS the down payment)."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": True}
+        result = format_remaining_variables(variables)
+        assert "down payment" not in result.lower()
+
+    def test_both_shows_other_lc_sub_fields(self):
+        """Mortgage+LC → balance, interest, amortization, balloon still visible."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": True}
+        result = format_remaining_variables(variables)
+        assert "Balance" in result
+        assert "Interest Rate" in result
+
+    def test_both_shows_mixed_fields(self):
+        """Mortgage+LC → mixed-payment fields visible."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": True}
+        result = format_remaining_variables(variables)
+        assert "Mortgage Percentage" in result
         assert "Mortgage Amount" in result
         assert "Land Contract Percentage" in result
         assert "Land Contract Amount" in result
 
-    def test_remaining_hides_mixed_fields_when_neither(self):
-        """Both=False → 6 mixed fields NOT in remaining list."""
-        from pa_handler import format_remaining_variables
+    # --- None vs False distinction ---
 
-        variables = {"payment_mortgage": False, "payment_land_contract": False}
+    def test_none_value_does_not_hide_fields(self):
+        """payment_land_contract=None (not answered) should NOT hide LC fields."""
+        from pa_handler import format_remaining_variables
+        # Only mortgage set, LC is None (not yet answered, no key at all)
+        variables = {"payment_mortgage": True}
         result = format_remaining_variables(variables)
-        for field in self.MIXED_FIELDS:
-            assert field not in result.lower(), f"{field} should be hidden"
+        # LC boolean itself should be hidden (mortgage is selected)
+        assert "payment_land_contract" not in result.lower()
+        # But LC sub-fields should also be hidden since LC is not True
+        for field in self.LC_SUB_FIELDS:
+            assert field not in result.lower()
+
+    def test_false_value_hides_fields(self):
+        """payment_land_contract=False (explicitly declined) hides LC fields."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": False}
+        result = format_remaining_variables(variables)
+        for field in self.LC_SUB_FIELDS:
+            assert field not in result.lower()
 
 
 # ===========================================================================

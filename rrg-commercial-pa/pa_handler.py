@@ -12,7 +12,10 @@ import json
 import os
 from typing import Optional
 
-from exhibit_a_helpers import exhibit_a_active, exhibit_a_multi_owner
+from exhibit_a_helpers import (
+    exhibit_a_active, exhibit_a_multi_owner,
+    compute_payment_excluded_fields, MIXED_PAYMENT_FIELDS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -129,12 +132,8 @@ EXHIBIT_A_SELLER_FIELDS = frozenset({
     "seller_name", "seller_address", "seller_entity_type",
 })
 
-# Fields only relevant when BOTH mortgage and land contract are selected
-_MIXED_PAYMENT_FIELDS = frozenset({
-    "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
-    "lc_pct", "lc_amount_words", "lc_amount_number",
-    "lc_subordinate",
-})
+# Re-export for backwards compat (used by tests)
+_MIXED_PAYMENT_FIELDS = MIXED_PAYMENT_FIELDS
 
 
 
@@ -464,10 +463,8 @@ def format_remaining_variables(variables: dict) -> str:
         if exhibit_a_multi_owner(entities):
             skip_fields |= EXHIBIT_A_SELLER_FIELDS
 
-    # Hide mixed-payment fields unless both methods are selected
-    both_payment = variables.get("payment_mortgage") and variables.get("payment_land_contract")
-    if not both_payment:
-        skip_fields |= _MIXED_PAYMENT_FIELDS
+    # Hide payment-related fields based on selected methods
+    skip_fields |= compute_payment_excluded_fields(variables)
 
     # Build set of paired fields for collapsing
     paired_fields = {}  # field → (partner_field, display_label)

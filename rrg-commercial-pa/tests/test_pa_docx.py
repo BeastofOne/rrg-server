@@ -740,6 +740,78 @@ class TestExhibitAHelpers:
 
 
 # ===========================================================================
+# Payment Exclusion Logic (shared compute_payment_excluded_fields)
+# ===========================================================================
+
+class TestComputePaymentExcludedFields:
+    """Tests for the shared compute_payment_excluded_fields function."""
+
+    def test_none_selected_excludes_only_mixed(self):
+        from exhibit_a_helpers import compute_payment_excluded_fields, MIXED_PAYMENT_FIELDS
+        result = compute_payment_excluded_fields({})
+        assert result == MIXED_PAYMENT_FIELDS
+
+    def test_cash_only_excludes_all_non_cash(self):
+        from exhibit_a_helpers import compute_payment_excluded_fields, LC_SUB_FIELDS, MIXED_PAYMENT_FIELDS
+        result = compute_payment_excluded_fields({"payment_cash": True})
+        assert "payment_mortgage" in result
+        assert "payment_land_contract" in result
+        assert LC_SUB_FIELDS <= result
+        assert MIXED_PAYMENT_FIELDS <= result
+        assert "payment_cash" not in result
+
+    def test_mortgage_only_excludes_cash_lc_mixed(self):
+        from exhibit_a_helpers import compute_payment_excluded_fields, LC_SUB_FIELDS, MIXED_PAYMENT_FIELDS
+        result = compute_payment_excluded_fields({"payment_mortgage": True, "payment_land_contract": False})
+        assert "payment_cash" in result
+        assert "payment_land_contract" in result
+        assert LC_SUB_FIELDS <= result
+        assert MIXED_PAYMENT_FIELDS <= result
+
+    def test_lc_only_excludes_cash_mortgage_mixed(self):
+        from exhibit_a_helpers import compute_payment_excluded_fields, MIXED_PAYMENT_FIELDS
+        result = compute_payment_excluded_fields({"payment_land_contract": True, "payment_mortgage": False})
+        assert "payment_cash" in result
+        assert "payment_mortgage" in result
+        assert MIXED_PAYMENT_FIELDS <= result
+        # LC sub-fields should NOT be excluded
+        assert "lc_down_payment" not in result
+        assert "lc_balance" not in result
+
+    def test_both_mortgage_lc_excludes_cash_and_down_payment(self):
+        from exhibit_a_helpers import compute_payment_excluded_fields
+        result = compute_payment_excluded_fields({"payment_mortgage": True, "payment_land_contract": True})
+        assert "payment_cash" in result
+        assert "lc_down_payment" in result
+        # Mixed fields should NOT be excluded (both methods selected)
+        assert "mortgage_pct" not in result
+        assert "lc_pct" not in result
+        # Other LC sub-fields should NOT be excluded
+        assert "lc_balance" not in result
+        assert "lc_interest_rate" not in result
+
+    def test_none_vs_false_distinction(self):
+        """payment_land_contract=None should not be treated as False."""
+        from exhibit_a_helpers import compute_payment_excluded_fields
+        # Mortgage True, LC not set (None) — LC is not True so sub-fields excluded
+        result = compute_payment_excluded_fields({"payment_mortgage": True})
+        assert "lc_down_payment" in result
+        assert "lc_balance" in result
+
+    def test_all_three_selected(self):
+        from exhibit_a_helpers import compute_payment_excluded_fields
+        result = compute_payment_excluded_fields({
+            "payment_cash": True, "payment_mortgage": True, "payment_land_contract": True,
+        })
+        # No payment booleans excluded
+        assert "payment_cash" not in result
+        assert "payment_mortgage" not in result
+        assert "payment_land_contract" not in result
+        # lc_down_payment excluded (mixed mode)
+        assert "lc_down_payment" in result
+
+
+# ===========================================================================
 # Address Grouping (_group_entities_by_address)
 # ===========================================================================
 
