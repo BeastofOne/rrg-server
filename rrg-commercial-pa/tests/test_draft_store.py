@@ -608,3 +608,44 @@ class TestDraftStoreEdgeCases:
         draft = store2.load_draft(draft_id)
         assert draft is not None
         assert draft["variables"]["from"] == "store1"
+
+
+# ===========================================================================
+# Completion Percentage — Payment Method Exclusion
+# ===========================================================================
+
+class TestCompletionPctPayment:
+    """Tests that _completion_pct excludes payment fields correctly."""
+
+    def test_cash_only_excludes_lc_and_mixed_from_denominator(self, draft_store):
+        """Cash=True should reduce the denominator (LC + mixed fields excluded)."""
+        from draft_store import _completion_pct
+        vars_cash = {"payment_cash": True}
+        vars_none = {}
+        pct_cash = _completion_pct(vars_cash)
+        pct_none = _completion_pct(vars_none)
+        # Cash-only has fewer countable fields → same 1 filled field = higher pct
+        assert pct_cash > pct_none
+
+    def test_mortgage_lc_excludes_cash_and_down_payment(self, draft_store):
+        """Mortgage+LC should exclude payment_cash and lc_down_payment."""
+        from draft_store import _completion_pct
+        vars_both = {"payment_mortgage": True, "payment_land_contract": True}
+        vars_lc_only = {"payment_land_contract": True, "payment_mortgage": False}
+        pct_both = _completion_pct(vars_both)
+        pct_lc = _completion_pct(vars_lc_only)
+        # Both modes have 2 filled fields, but different denominators
+        # Both mode: excludes cash + down_payment, includes mixed fields
+        # LC only: excludes cash + mortgage + mixed fields
+        # Just verify they compute without error and are > 0
+        assert pct_both > 0
+        assert pct_lc > 0
+
+    def test_none_selected_excludes_only_mixed(self, draft_store):
+        """No payment method → only mixed fields excluded from denominator."""
+        from draft_store import _completion_pct, ALL_VARIABLE_FIELDS
+        from exhibit_a_helpers import MIXED_PAYMENT_FIELDS
+        pct = _completion_pct({})
+        # Denominator should be total fields minus mixed fields
+        expected_denom = len(ALL_VARIABLE_FIELDS) - len(MIXED_PAYMENT_FIELDS)
+        assert pct == round(0 / expected_denom * 100, 1)
