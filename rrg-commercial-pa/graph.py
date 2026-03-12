@@ -22,7 +22,6 @@ import draft_store as draft_store_module
 from draft_store import DraftStore
 from pa_handler import (
     extract_pa_data,
-    apply_changes,
     classify_action,
     format_remaining_variables,
     format_filled_summary,
@@ -312,31 +311,33 @@ def edit_node(state: PaState) -> dict:
     msg = state.get("user_message", "")
     llm_error = False
 
-    # Try apply_changes with one retry on JSON parse failure
+    # Use extract_pa_data WITHOUT existing_data to keep prompt under ~2K chars.
+    # Claude CLI bug #7263: returns empty stdout on prompts >~7K chars.
+    # apply_changes dumped all existing vars as JSON (~6-10K chars) and hit this.
+    # extract_pa_data returns only new/changed fields; update_draft handles merge.
     for attempt in range(2):
         try:
-            updated = apply_changes(
-                variables,
-                msg,
-                state.get("chat_history"),
-            )
-            if isinstance(updated, dict):
+            extracted = extract_pa_data(msg)
+            if isinstance(extracted, dict):
                 # Strip None and empty strings — they mean "not filled"
                 # Keep False, 0, [] so booleans/numbers/entity lists work
-                updated = {k: v for k, v in updated.items() if v is not None and v != ""}
-                store.update_draft(draft_id, updated)
-                variables = updated
+                extracted = {k: v for k, v in extracted.items()
+                             if v is not None and v != ""}
+                if extracted:
+                    store.update_draft(draft_id, extracted)
+                    variables = dict(old_variables)
+                    variables.update(extracted)
             break  # success
         except json.JSONDecodeError as exc:
             if attempt == 0:
-                logger.warning("apply_changes JSON parse failed (retrying): %s", exc)
+                logger.warning("extract_pa_data JSON parse failed (retrying): %s", exc)
                 continue  # retry once
-            logger.error("apply_changes JSON parse failed after retry: %s", exc, exc_info=True)
+            logger.error("extract_pa_data JSON parse failed after retry: %s", exc, exc_info=True)
             llm_error = True
         except Exception as exc:
-            logger.error("apply_changes failed: %s", exc, exc_info=True)
+            logger.error("extract_pa_data failed: %s", exc, exc_info=True)
             llm_error = True
-            break  # don't retry non-JSON errors
+            break  # don't retry non-parse errors
 
     # Show what changed (only real values, not empty/None)
     changed = {}
