@@ -71,8 +71,10 @@ FIELD_GROUPS = [
     ("Closing", "closing timeline", [
         "closing_days", "closing_days_words",
     ]),
-    ("Broker", "broker names and commission", [
-        "broker_name", "broker_commission_pct", "broker_commission_amount",
+    ("Broker", "broker names and commission. "
+     "broker_commission_description is the EXACT commission text as stated by the user "
+     "(e.g. '3% of the gross purchase price' or '$25,000'). Do NOT compute or reformat — use their words", [
+        "broker_name", "broker_commission_description",
         "seller_broker_name", "seller_broker_company",
     ]),
     ("Offer Expiration", "when the offer expires", [

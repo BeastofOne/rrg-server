@@ -237,6 +237,17 @@ def _build_context(variables: dict) -> dict:
         ctx.get("exhibit_a_entities", [])
     )
 
+    # Backwards compat: compose broker_commission_description from old fields
+    if "broker_commission_description" not in ctx:
+        pct = ctx.get("broker_commission_pct", "")
+        amt = ctx.get("broker_commission_amount", "")
+        if pct and amt:
+            ctx["broker_commission_description"] = f"{amt} ({pct} of the purchase price)"
+        elif pct:
+            ctx["broker_commission_description"] = f"{pct} of the purchase price"
+        elif amt:
+            ctx["broker_commission_description"] = amt
+
     # Set safe fallback defaults before Exhibit A logic
     ctx.setdefault("seller_intro", ctx.get("seller_name", ""))
     ctx.setdefault("seller_address_intro", f"whose address is {ctx.get('seller_address', '')}" if ctx.get("seller_address") else "")
