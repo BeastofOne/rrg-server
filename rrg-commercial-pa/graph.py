@@ -311,13 +311,35 @@ def edit_node(state: PaState) -> dict:
     msg = state.get("user_message", "")
     llm_error = False
 
-    # Use extract_pa_data WITHOUT existing_data to keep prompt under ~2K chars.
-    # Claude CLI bug #7263: returns empty stdout on prompts >~7K chars.
-    # apply_changes dumped all existing vars as JSON (~6-10K chars) and hit this.
-    # extract_pa_data returns only new/changed fields; update_draft handles merge.
+    # Build slim context so the LLM can disambiguate parties/fields without
+    # dumping all ~60 variables (which exceeds Claude CLI's ~7K char limit).
+    # Include: identity fields for both parties, and the last assistant message
+    # so the LLM knows which question is being answered.
+    slim_context = {}
+    for key in ("purchaser_name", "purchaser_entity_type",
+                "seller_name", "seller_entity_type"):
+        val = old_variables.get(key)
+        if val:
+            slim_context[key] = val
+
+    # Include payment method booleans (needed for mixed-payment field attribution)
+    for key in ("payment_cash", "payment_mortgage", "payment_land_contract"):
+        val = old_variables.get(key)
+        if val is not None:
+            slim_context[key] = val
+
+    # Append last assistant message so LLM sees what question was asked
+    chat_history = state.get("chat_history") or []
+    for entry in reversed(chat_history):
+        if entry.get("role") == "assistant":
+            # Truncate to avoid blowing up prompt size
+            assistant_msg = entry["content"][:400]
+            slim_context["_last_assistant_message"] = assistant_msg
+            break
+
     for attempt in range(2):
         try:
-            extracted = extract_pa_data(msg)
+            extracted = extract_pa_data(msg, existing_data=slim_context or None)
             if isinstance(extracted, dict):
                 # Strip None and empty strings — they mean "not filled"
                 # Keep False, 0, [] so booleans/numbers/entity lists work
