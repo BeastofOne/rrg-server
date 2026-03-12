@@ -26,7 +26,11 @@ FIELD_GROUPS = [
      "effective_date_month must be the full month name (e.g. 'March', not '3' or '03')", [
         "effective_date_day", "effective_date_month", "effective_date_year",
     ]),
-    ("Purchaser", "the buying entity", [
+    ("Purchaser", "the buying entity. "
+     "purchaser_entity_type MUST be the full legal form with state, e.g. "
+     "'a Michigan limited liability company' or 'a Delaware corporation'. "
+     "If the name contains LLC/Inc/Corp but no state is given, set entity_type to 'LLC' or 'Inc' "
+     "(the system will ask the user about the state)", [
         "purchaser_name", "purchaser_entity_type", "purchaser_address",
         "purchaser_phone", "purchaser_email", "purchaser_fax",
     ]),
@@ -34,7 +38,11 @@ FIELD_GROUPS = [
         "purchaser_copy_name", "purchaser_copy_address",
         "purchaser_copy_phone", "purchaser_copy_email",
     ]),
-    ("Seller", "the selling entity", [
+    ("Seller", "the selling entity. "
+     "seller_entity_type MUST be the full legal form with state, e.g. "
+     "'a Michigan limited liability company' or 'a Delaware corporation'. "
+     "If the name contains LLC/Inc/Corp but no state is given, set entity_type to 'LLC' or 'Inc' "
+     "(the system will ask the user about the state)", [
         "seller_name", "seller_entity_type", "seller_address",
         "seller_phone", "seller_email", "seller_fax",
     ]),
@@ -262,6 +270,12 @@ def apply_changes(
 
     prompt += (
         f"User instruction: {user_message}\n\n"
+        "ENTITY TYPE RESOLUTION: If the user confirms a state of incorporation "
+        "(e.g. 'yes' meaning Michigan, or 'Utah', or 'it's a Delaware LLC'), "
+        "update the relevant entity_type to the full form: "
+        "'a {State} limited liability company' for LLC, "
+        "'a {State} corporation' for Inc/Corp. "
+        "Check chat history for which entity was being asked about.\n\n"
         "Return ONLY a complete JSON object with ALL variables — "
         "the unchanged ones plus any modified ones. "
         "Use ONLY the exact field names listed above (snake_case). "

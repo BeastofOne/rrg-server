@@ -33,6 +33,69 @@ from pa_docx import generate_pa_docx
 
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "haiku")
 
+# Entity type abbreviations that need a state of incorporation
+_ENTITY_ABBREVS = {
+    "llc": "limited liability company",
+    "inc": "corporation",
+    "inc.": "corporation",
+    "corp": "corporation",
+    "corp.": "corporation",
+    "pllc": "professional limited liability company",
+}
+
+
+def _check_entity_type_questions(variables: dict) -> str:
+    """Check if any entity types need state-of-incorporation clarification.
+
+    Returns a follow-up question string, or empty string if nothing to ask.
+    """
+    questions = []
+
+    # Check purchaser and seller
+    for role, name_key, type_key in [
+        ("purchaser", "purchaser_name", "purchaser_entity_type"),
+        ("seller", "seller_name", "seller_entity_type"),
+    ]:
+        name = (variables.get(name_key) or "").strip()
+        etype = (variables.get(type_key) or "").strip()
+        if not name or not etype:
+            continue
+        # If entity_type is just an abbreviation (no state), ask
+        if etype.lower() in _ENTITY_ABBREVS:
+            questions.append(
+                f'Is **{name}** incorporated in the State of Michigan? '
+                f'If not, what state?'
+            )
+
+    # Check Exhibit A entities
+    entities = variables.get("exhibit_a_entities", [])
+    if isinstance(entities, list):
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+            owner = (entity.get("owner") or entity.get("name") or "").strip()
+            etype = (entity.get("entity_type") or "").strip()
+            if not owner:
+                continue
+            # If no entity_type set but name looks like an entity, ask
+            if not etype:
+                name_lower = owner.lower().rstrip(".,")
+                name_parts = name_lower.split()
+                if name_parts and name_parts[-1] in _ENTITY_ABBREVS:
+                    questions.append(
+                        f'Is **{owner}** incorporated in the State of Michigan? '
+                        f'If not, what state?'
+                    )
+            elif etype.lower() in _ENTITY_ABBREVS:
+                questions.append(
+                    f'Is **{owner}** incorporated in the State of Michigan? '
+                    f'If not, what state?'
+                )
+
+    if not questions:
+        return ""
+    return "**I need to clarify:**\n" + "\n".join(f"- {q}" for q in questions)
+
 
 def _get_llm():
     """Return a ChatClaudeCLI instance using CLAUDE_MODEL env var."""
@@ -169,6 +232,9 @@ def start_new_node(state: PaState) -> dict:
         response_parts.append(f"Got it, here's what I picked up:\n{filled_summary}")
     if exhibit_a:
         response_parts.append(exhibit_a)
+    entity_questions = _check_entity_type_questions(initial_vars)
+    if entity_questions:
+        response_parts.append(entity_questions)
     if remaining:
         response_parts.append(f"Remaining variables to fill:\n{remaining}")
     else:
@@ -334,6 +400,10 @@ def edit_node(state: PaState) -> dict:
     exhibit_a = format_exhibit_a_summary(variables)
     if exhibit_a:
         response_parts.append(exhibit_a)
+
+    entity_questions = _check_entity_type_questions(variables)
+    if entity_questions:
+        response_parts.append(entity_questions)
 
     remaining = format_remaining_variables(variables)
     if remaining:
