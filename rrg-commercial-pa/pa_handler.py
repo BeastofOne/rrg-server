@@ -107,6 +107,14 @@ DISPLAY_PAIRS = {
     ("purchase_price_words", "purchase_price_number"): "Purchase Price",
     ("earnest_money_words", "earnest_money_number"): "Earnest Money",
     ("closing_days", "closing_days_words"): "Closing Days",
+    ("mortgage_amount_words", "mortgage_amount_number"): "Mortgage Amount",
+    ("lc_amount_words", "lc_amount_number"): "Land Contract Amount",
+}
+
+# Custom display labels for fields whose auto-generated labels are ambiguous
+_DISPLAY_LABELS = {
+    "mortgage_pct": "Mortgage Percentage",
+    "lc_pct": "Land Contract Percentage",
 }
 
 # Fields covered by Exhibit A when active (2+ entities)
@@ -464,7 +472,7 @@ def format_remaining_variables(variables: dict) -> str:
                     lines.append(f"- {pair_label}")
                     already_shown.add(partner)
                     continue
-            label = _strip_group_prefix(field, group_name)
+            label = _DISPLAY_LABELS.get(field) or _strip_group_prefix(field, group_name)
             lines.append(f"- {label}")
         sections.append("\n".join(lines))
 

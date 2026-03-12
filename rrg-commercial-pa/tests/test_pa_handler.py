@@ -636,10 +636,11 @@ class TestMixedPaymentFieldsVisibility:
 
         variables = {"payment_mortgage": True, "payment_land_contract": True}
         result = format_remaining_variables(variables)
-        # At least the percentage fields should appear (they are empty/missing)
-        assert "Pct" in result or "pct" in result.lower() or "Mortgage Pct" in result or \
-            "Amount Words" in result or "Amount Number" in result, \
-            f"Mixed payment fields should appear when both methods selected. Got:\n{result}"
+        assert "Mortgage Percentage" in result, \
+            f"Mortgage Percentage should appear when both methods selected. Got:\n{result}"
+        assert "Mortgage Amount" in result
+        assert "Land Contract Percentage" in result
+        assert "Land Contract Amount" in result
 
     def test_remaining_hides_mixed_fields_when_neither(self):
         """Both=False → 6 mixed fields NOT in remaining list."""
