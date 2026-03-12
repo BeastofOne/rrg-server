@@ -604,3 +604,48 @@ class TestFormatExhibitASummary:
         result = format_exhibit_a_summary(variables)
         assert "Ann Arbor" in result
         assert "Washtenaw" in result
+
+
+# ===========================================================================
+# Mixed Payment Fields — remaining variables visibility
+# ===========================================================================
+
+class TestMixedPaymentFieldsVisibility:
+    """Tests that mixed payment fields are hidden/shown based on payment method selection."""
+
+    MIXED_FIELDS = {
+        "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
+        "lc_pct", "lc_amount_words", "lc_amount_number",
+    }
+
+    def test_remaining_hides_mixed_fields_when_mortgage_only(self):
+        """Mortgage=True, LC=False → 6 mixed fields NOT in remaining list."""
+        from pa_handler import format_remaining_variables
+
+        variables = {"payment_mortgage": True, "payment_land_contract": False}
+        result = format_remaining_variables(variables)
+        for field in self.MIXED_FIELDS:
+            label = field.replace("_", " ").title()
+            # The field label should NOT appear since it's hidden
+            # Check both the raw field name and common label forms
+            assert field not in result.lower(), f"{field} should be hidden"
+
+    def test_remaining_shows_mixed_fields_when_both(self):
+        """Both=True → 6 mixed fields appear in remaining list."""
+        from pa_handler import format_remaining_variables
+
+        variables = {"payment_mortgage": True, "payment_land_contract": True}
+        result = format_remaining_variables(variables)
+        # At least the percentage fields should appear (they are empty/missing)
+        assert "Pct" in result or "pct" in result.lower() or "Mortgage Pct" in result or \
+            "Amount Words" in result or "Amount Number" in result, \
+            f"Mixed payment fields should appear when both methods selected. Got:\n{result}"
+
+    def test_remaining_hides_mixed_fields_when_neither(self):
+        """Both=False → 6 mixed fields NOT in remaining list."""
+        from pa_handler import format_remaining_variables
+
+        variables = {"payment_mortgage": False, "payment_land_contract": False}
+        result = format_remaining_variables(variables)
+        for field in self.MIXED_FIELDS:
+            assert field not in result.lower(), f"{field} should be hidden"

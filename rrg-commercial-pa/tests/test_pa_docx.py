@@ -866,3 +866,166 @@ class TestGroupEntitiesByAddress:
         result = _group_entities_by_address(entities)
         assert len(result) == 1
         # Should have 3 unique parcel IDs: 001, 002, 003 (not 4)
+
+
+# ===========================================================================
+# Mixed Payment Methods (Mortgage + Land Contract)
+# ===========================================================================
+
+class TestMixedPaymentMethods:
+    """Tests for conditional template language when both mortgage and LC are selected."""
+
+    def _get_doc_xml(self, variables):
+        """Helper: render and return the document XML as a string."""
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            return zf.read("word/document.xml").decode("utf-8")
+
+    def test_mortgage_only_says_full_price(self, complete_variables):
+        """Mortgage=True, LC=False → 'full Purchase Price' in mortgage clause."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = False
+        variables["payment_cash"] = False
+        doc_xml = self._get_doc_xml(variables)
+        # Find the mortgage clause area
+        idx = doc_xml.find("New Mortgage")
+        assert idx != -1, "New Mortgage clause not found"
+        # Extract a window around the mortgage clause
+        mortgage_area = doc_xml[idx:idx + 600]
+        assert "full Purchase Price" in mortgage_area
+
+    def test_land_contract_only_says_full_price(self, complete_variables):
+        """LC=True, Mortgage=False → 'full Purchase Price' in LC clause."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = False
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["lc_down_payment"] = 500000
+        variables["lc_balance"] = 2000000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        idx = doc_xml.find("Land Contract.")
+        assert idx != -1, "Land Contract clause not found"
+        lc_area = doc_xml[idx:idx + 600]
+        assert "full Purchase Price" in lc_area
+
+    def test_both_selected_pct_filled_mortgage_shows_pct(self, complete_variables):
+        """Both=True, mortgage_pct='60' → '60%' appears in mortgage clause."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = "60"
+        variables["mortgage_amount_words"] = "Six Hundred Thousand"
+        variables["mortgage_amount_number"] = "$600,000.00"
+        variables["lc_pct"] = "40"
+        variables["lc_amount_words"] = "Four Hundred Thousand"
+        variables["lc_amount_number"] = "$400,000.00"
+        variables["lc_down_payment"] = 100000
+        variables["lc_balance"] = 300000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        idx = doc_xml.find("New Mortgage")
+        assert idx != -1
+        mortgage_area = doc_xml[idx:idx + 800]
+        assert "60%" in mortgage_area
+        assert "full Purchase Price" not in mortgage_area
+
+    def test_both_selected_pct_filled_lc_shows_pct(self, complete_variables):
+        """Both=True, lc_pct='40' → '40%' appears in LC clause."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = "60"
+        variables["mortgage_amount_words"] = "Six Hundred Thousand"
+        variables["mortgage_amount_number"] = "$600,000.00"
+        variables["lc_pct"] = "40"
+        variables["lc_amount_words"] = "Four Hundred Thousand"
+        variables["lc_amount_number"] = "$400,000.00"
+        variables["lc_down_payment"] = 100000
+        variables["lc_balance"] = 300000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        idx = doc_xml.find("Land Contract.")
+        assert idx != -1
+        lc_area = doc_xml[idx:idx + 800]
+        assert "40%" in lc_area
+        assert "full Purchase Price" not in lc_area
+
+    def test_both_selected_renders_dollar_amounts(self, complete_variables):
+        """Both=True with amounts → dollar amounts appear in XML."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = "60"
+        variables["mortgage_amount_words"] = "Six Hundred Thousand"
+        variables["mortgage_amount_number"] = "$600,000.00"
+        variables["lc_pct"] = "40"
+        variables["lc_amount_words"] = "Four Hundred Thousand"
+        variables["lc_amount_number"] = "$400,000.00"
+        variables["lc_down_payment"] = 100000
+        variables["lc_balance"] = 300000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        assert "Six Hundred Thousand" in doc_xml
+        assert "$600,000.00" in doc_xml
+        assert "Four Hundred Thousand" in doc_xml
+        assert "$400,000.00" in doc_xml
+
+    def test_both_selected_pct_empty_falls_back(self, complete_variables):
+        """Both=True, pct fields empty → 'full Purchase Price' still used."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = ""
+        variables["lc_pct"] = ""
+        variables["lc_down_payment"] = 500000
+        variables["lc_balance"] = 2000000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        # Both clauses should use "full Purchase Price" since pct is empty
+        idx_m = doc_xml.find("New Mortgage")
+        assert idx_m != -1
+        mortgage_area = doc_xml[idx_m:idx_m + 600]
+        assert "full Purchase Price" in mortgage_area
+
+        idx_lc = doc_xml.find("Land Contract.")
+        assert idx_lc != -1
+        lc_area = doc_xml[idx_lc:idx_lc + 600]
+        assert "full Purchase Price" in lc_area
+
+    def test_all_three_payment_methods_renders(self, complete_variables):
+        """Cash+Mortgage+LC all true → doesn't crash."""
+        variables = {**complete_variables}
+        variables["payment_cash"] = True
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["mortgage_pct"] = "50"
+        variables["mortgage_amount_words"] = "Five Hundred Thousand"
+        variables["mortgage_amount_number"] = "$500,000.00"
+        variables["lc_pct"] = "30"
+        variables["lc_amount_words"] = "Three Hundred Thousand"
+        variables["lc_amount_number"] = "$300,000.00"
+        variables["lc_down_payment"] = 50000
+        variables["lc_balance"] = 250000
+        variables["lc_interest_rate"] = 6.0
+        variables["lc_amortization_years"] = 25
+        variables["lc_balloon_months"] = 48
+        result = generate_pa_docx(variables)
+        assert result is not None
+        assert result[:2] == b"PK"

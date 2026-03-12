@@ -58,9 +58,16 @@ FIELD_GROUPS = [
      "purchase_price_words and purchase_price_number are the SAME value in different formats — "
      "fill BOTH from a single price (words = 'One Million Dollars', number = '$1,000,000.00'). "
      "Number fields MUST include $ sign and .00 cents. "
-     "Same for earnest_money_words and earnest_money_number", [
+     "Same for earnest_money_words and earnest_money_number. "
+     "mortgage_pct, mortgage_amount_words, mortgage_amount_number, lc_pct, "
+     "lc_amount_words, lc_amount_number are ONLY needed when BOTH payment_mortgage "
+     "AND payment_land_contract are true — they describe each method's share. "
+     "pct = just the number (e.g. '60'), amount_words = English, "
+     "amount_number includes $ and .00", [
         "purchase_price_words", "purchase_price_number",
         "payment_cash", "payment_mortgage", "payment_land_contract",
+        "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
+        "lc_pct", "lc_amount_words", "lc_amount_number",
         "lc_down_payment", "lc_balance", "lc_interest_rate",
         "lc_amortization_years", "lc_balloon_months",
         "earnest_money_words", "earnest_money_number",
@@ -109,6 +116,12 @@ EXHIBIT_A_PROPERTY_FIELDS = frozenset({
 })
 EXHIBIT_A_SELLER_FIELDS = frozenset({
     "seller_name", "seller_address", "seller_entity_type",
+})
+
+# Fields only relevant when BOTH mortgage and land contract are selected
+_MIXED_PAYMENT_FIELDS = frozenset({
+    "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
+    "lc_pct", "lc_amount_words", "lc_amount_number",
 })
 
 
@@ -417,6 +430,11 @@ def format_remaining_variables(variables: dict) -> str:
         skip_fields |= EXHIBIT_A_PROPERTY_FIELDS
         if exhibit_a_multi_owner(entities):
             skip_fields |= EXHIBIT_A_SELLER_FIELDS
+
+    # Hide mixed-payment fields unless both methods are selected
+    both_payment = variables.get("payment_mortgage") and variables.get("payment_land_contract")
+    if not both_payment:
+        skip_fields |= _MIXED_PAYMENT_FIELDS
 
     # Build set of paired fields for collapsing
     paired_fields = {}  # field → (partner_field, display_label)

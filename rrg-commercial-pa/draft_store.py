@@ -32,6 +32,8 @@ ALL_VARIABLE_FIELDS = [
     # Financial
     "purchase_price_words", "purchase_price_number",
     "payment_cash", "payment_mortgage", "payment_land_contract",
+    "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
+    "lc_pct", "lc_amount_words", "lc_amount_number",
     "lc_down_payment", "lc_balance", "lc_interest_rate",
     "lc_amortization_years", "lc_balloon_months",
     "earnest_money_words", "earnest_money_number",
@@ -69,6 +71,11 @@ _EXHIBIT_A_SELLER_FIELDS = frozenset({
     "seller_name", "seller_address", "seller_entity_type",
 })
 
+_MIXED_PAYMENT_FIELDS = frozenset({
+    "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
+    "lc_pct", "lc_amount_words", "lc_amount_number",
+})
+
 
 def _completion_pct(variables: dict) -> float:
     """Calculate percentage of ALL_VARIABLE_FIELDS that have non-None values.
@@ -86,11 +93,20 @@ def _completion_pct(variables: dict) -> float:
         if exhibit_a_multi_owner(entities):
             covered |= _EXHIBIT_A_SELLER_FIELDS
 
+    # Exclude mixed-payment fields when both methods aren't selected
+    both_payment = variables.get("payment_mortgage") and variables.get("payment_land_contract")
+    excluded = set()
+    if not both_payment:
+        excluded = _MIXED_PAYMENT_FIELDS
+
+    countable = [f for f in ALL_VARIABLE_FIELDS if f not in excluded]
+    if not countable:
+        return 0.0
     filled = sum(
-        1 for field in ALL_VARIABLE_FIELDS
+        1 for field in countable
         if field in covered or variables.get(field) is not None
     )
-    return round(filled / len(ALL_VARIABLE_FIELDS) * 100, 1)
+    return round(filled / len(countable) * 100, 1)
 
 
 class DraftStore:

@@ -3,7 +3,7 @@
 ## What
 Conversational purchase agreement generator for commercial real estate deals. Flask microservice on port 8102, part of the jake-deploy Docker stack on rrg-server (100.97.86.99). Called by the message router (`f/switchboard/message_router`).
 
-Extracts ~55 deal variables through conversation, persists drafts in SQLite, and renders `.docx` files via docxtpl.
+Extracts ~61 deal variables through conversation, persists drafts in SQLite, and renders `.docx` files via docxtpl.
 
 ## LangGraph Workflow (10 nodes)
 
