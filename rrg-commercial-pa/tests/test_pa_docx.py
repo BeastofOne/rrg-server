@@ -379,6 +379,18 @@ class TestDocxEdgeCases:
             doc_xml = zf.read("word/document.xml").decode("utf-8")
             assert "500000" in doc_xml or "500,000" in doc_xml
 
+    def test_broker_commission_no_duplicate_at_closing(self, complete_variables):
+        """Commission description with 'at closing' should not produce 'at closing at closing'."""
+        variables = {**complete_variables}
+        variables["broker_name"] = "Resource Realty Group"
+        variables["broker_commission_description"] = "3% of the purchase price at closing"
+        result = generate_pa_docx(variables)
+        buf = io.BytesIO(result)
+        with zipfile.ZipFile(buf) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "at closing at closing" not in doc_xml.lower()
+            assert "at closing" in doc_xml.lower()
+
     def test_generate_returns_new_bytes_each_call(self, complete_variables):
         """Each call should return fresh bytes (not a cached reference)."""
         result1 = generate_pa_docx(complete_variables)
