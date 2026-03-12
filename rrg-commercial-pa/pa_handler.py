@@ -63,11 +63,13 @@ FIELD_GROUPS = [
      "lc_amount_words, lc_amount_number are ONLY needed when BOTH payment_mortgage "
      "AND payment_land_contract are true — they describe each method's share. "
      "pct = just the number (e.g. '60'), amount_words = English, "
-     "amount_number includes $ and .00", [
+     "amount_number includes $ and .00. "
+     "lc_subordinate (bool) = whether the land contract is subordinate to the mortgage", [
         "purchase_price_words", "purchase_price_number",
         "payment_cash", "payment_mortgage", "payment_land_contract",
         "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
         "lc_pct", "lc_amount_words", "lc_amount_number",
+        "lc_subordinate",
         "lc_down_payment", "lc_balance", "lc_interest_rate",
         "lc_amortization_years", "lc_balloon_months",
         "earnest_money_words", "earnest_money_number",
@@ -115,6 +117,7 @@ DISPLAY_PAIRS = {
 _DISPLAY_LABELS = {
     "mortgage_pct": "Mortgage Percentage",
     "lc_pct": "Land Contract Percentage",
+    "lc_subordinate": "Land Contract Subordinate to Mortgage?",
 }
 
 # Fields covered by Exhibit A when active (2+ entities)
@@ -130,6 +133,7 @@ EXHIBIT_A_SELLER_FIELDS = frozenset({
 _MIXED_PAYMENT_FIELDS = frozenset({
     "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
     "lc_pct", "lc_amount_words", "lc_amount_number",
+    "lc_subordinate",
 })
 
 

@@ -1011,6 +1011,86 @@ class TestMixedPaymentMethods:
         assert "full Purchase Price" not in lc_area
         assert "% of the Purchase Price" in lc_area
 
+    def test_both_selected_no_down_payment_in_lc(self, complete_variables):
+        """Both=True → LC clause should NOT mention down payment or balance."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = "60"
+        variables["mortgage_amount_words"] = "Six Hundred Thousand"
+        variables["mortgage_amount_number"] = "$600,000.00"
+        variables["lc_pct"] = "40"
+        variables["lc_amount_words"] = "Four Hundred Thousand"
+        variables["lc_amount_number"] = "$400,000.00"
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        idx = doc_xml.find("Land Contract.")
+        assert idx != -1
+        lc_area = doc_xml[idx:idx + 1200]
+        assert "down payment" not in lc_area
+        assert "balance of" not in lc_area
+        # Should still have interest rate and amortization
+        assert "interest rate of" in lc_area.lower() or "interest at the rate" in lc_area.lower()
+
+    def test_lc_only_keeps_down_payment(self, complete_variables):
+        """LC-only → LC clause should still mention down payment and balance."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = False
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["lc_down_payment"] = 500000
+        variables["lc_balance"] = 2000000
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        idx = doc_xml.find("Land Contract.")
+        assert idx != -1
+        lc_area = doc_xml[idx:idx + 1200]
+        assert "down payment" in lc_area
+        assert "balance of" in lc_area
+
+    def test_both_selected_subordinate_true(self, complete_variables):
+        """Both=True, lc_subordinate=True → subordination sentence appears."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = "60"
+        variables["mortgage_amount_words"] = "Six Hundred Thousand"
+        variables["mortgage_amount_number"] = "$600,000.00"
+        variables["lc_pct"] = "40"
+        variables["lc_amount_words"] = "Four Hundred Thousand"
+        variables["lc_amount_number"] = "$400,000.00"
+        variables["lc_subordinate"] = True
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        assert "subordinate to the mortgage" in doc_xml
+
+    def test_both_selected_subordinate_false(self, complete_variables):
+        """Both=True, lc_subordinate=False → no subordination sentence."""
+        variables = {**complete_variables}
+        variables["payment_mortgage"] = True
+        variables["payment_land_contract"] = True
+        variables["payment_cash"] = False
+        variables["mortgage_pct"] = "60"
+        variables["mortgage_amount_words"] = "Six Hundred Thousand"
+        variables["mortgage_amount_number"] = "$600,000.00"
+        variables["lc_pct"] = "40"
+        variables["lc_amount_words"] = "Four Hundred Thousand"
+        variables["lc_amount_number"] = "$400,000.00"
+        variables["lc_subordinate"] = False
+        variables["lc_interest_rate"] = 6.5
+        variables["lc_amortization_years"] = 30
+        variables["lc_balloon_months"] = 60
+        doc_xml = self._get_doc_xml(variables)
+        assert "subordinate to the mortgage" not in doc_xml
+
     def test_all_three_payment_methods_renders(self, complete_variables):
         """Cash+Mortgage+LC all true → doesn't crash."""
         variables = {**complete_variables}
@@ -1023,6 +1103,7 @@ class TestMixedPaymentMethods:
         variables["lc_pct"] = "30"
         variables["lc_amount_words"] = "Three Hundred Thousand"
         variables["lc_amount_number"] = "$300,000.00"
+        variables["lc_subordinate"] = True
         variables["lc_down_payment"] = 50000
         variables["lc_balance"] = 250000
         variables["lc_interest_rate"] = 6.0

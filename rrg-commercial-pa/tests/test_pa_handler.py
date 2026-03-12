@@ -616,6 +616,7 @@ class TestMixedPaymentFieldsVisibility:
     MIXED_FIELDS = {
         "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
         "lc_pct", "lc_amount_words", "lc_amount_number",
+        "lc_subordinate",
     }
 
     def test_remaining_hides_mixed_fields_when_mortgage_only(self):

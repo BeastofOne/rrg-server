@@ -33,6 +33,7 @@ _BOOL_FIELDS = frozenset({
     "dd_leases_estoppel",
     "dd_other",
     "dd_governmental",
+    "lc_subordinate",
 })
 
 # List fields — default to [] when missing/None
