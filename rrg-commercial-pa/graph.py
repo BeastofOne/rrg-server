@@ -311,35 +311,29 @@ def edit_node(state: PaState) -> dict:
     msg = state.get("user_message", "")
     llm_error = False
 
-    # Build slim context so the LLM can disambiguate parties/fields without
-    # dumping all ~60 variables (which exceeds Claude CLI's ~7K char limit).
-    # Include: identity fields for both parties, and the last assistant message
-    # so the LLM knows which question is being answered.
-    slim_context = {}
-    for key in ("purchaser_name", "purchaser_entity_type",
-                "seller_name", "seller_entity_type"):
-        val = old_variables.get(key)
-        if val:
-            slim_context[key] = val
+    # Build compact context from ALL existing variables so the LLM can
+    # disambiguate parties/fields.  Filter out empties and large nested
+    # structures to stay under the Claude CLI ~7K char prompt limit.
+    compact = {}
+    for k, v in old_variables.items():
+        if k in ("exhibit_a_entities", "additional_provisions"):
+            continue
+        if v is None or v == "" or v == []:
+            continue
+        compact[k] = v
 
-    # Include payment method booleans (needed for mixed-payment field attribution)
-    for key in ("payment_cash", "payment_mortgage", "payment_land_contract"):
-        val = old_variables.get(key)
-        if val is not None:
-            slim_context[key] = val
-
-    # Append last assistant message so LLM sees what question was asked
+    # Prepend last assistant message so LLM knows which question is being
+    # answered (e.g., "Is Lago Investments a Michigan company?")
     chat_history = state.get("chat_history") or []
     for entry in reversed(chat_history):
         if entry.get("role") == "assistant":
-            # Truncate to avoid blowing up prompt size
             assistant_msg = entry["content"][:400]
-            slim_context["_last_assistant_message"] = assistant_msg
+            msg = f"[Context: assistant just asked: {assistant_msg}]\n\nUser reply: {msg}"
             break
 
     for attempt in range(2):
         try:
-            extracted = extract_pa_data(msg, existing_data=slim_context or None)
+            extracted = extract_pa_data(msg, existing_data=compact or None)
             if isinstance(extracted, dict):
                 # Strip None and empty strings — they mean "not filled"
                 # Keep False, 0, [] so booleans/numbers/entity lists work

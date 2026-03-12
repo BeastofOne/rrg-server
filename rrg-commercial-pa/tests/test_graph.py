@@ -180,6 +180,177 @@ class TestExtractFlow:
 
 
 # ===========================================================================
+# Edit Node — Compact Context
+# ===========================================================================
+
+class TestEditNodeContext:
+    """Tests for compact context passed to extract_pa_data from edit_node."""
+
+    @patch(DOCX_PATCH, return_value=b"PK\x03\x04fake")
+    @patch(HANDLER_LLM_PATCH)
+    @patch(GRAPH_LLM_PATCH)
+    def test_edit_passes_existing_vars_as_context(self, mock_gllm, mock_hllm, mock_docx, db_path):
+        """edit_node should pass all existing variables to extract_pa_data."""
+        initial = json.dumps({
+            "purchaser_name": "Lago Investments, LLC",
+            "property_address": "123 Main St",
+        })
+        entity_type = json.dumps({"purchaser_entity_type": "a Michigan LLC"})
+        mock_hllm.return_value = make_mock_llm(initial)
+        mock_gllm.return_value = make_mock_llm(initial)
+
+        with patch("draft_store.DB_PATH", db_path):
+            from graph import build_graph
+            graph = build_graph()
+
+            # Create a draft with initial data
+            result1 = graph.invoke({
+                "command": "create",
+                "user_message": "PA for 123 Main St, buyer Lago Investments, LLC",
+                "chat_history": [],
+                "draft_id": None,
+            })
+            draft_id = result1.get("draft_id")
+
+            # Now send an edit with the entity type answer
+            mock_hllm.return_value = make_mock_llm(entity_type)
+            mock_gllm.return_value = make_mock_llm('"edit"')
+            result2 = graph.invoke({
+                "command": "continue",
+                "user_message": "yes, Michigan",
+                "chat_history": [
+                    {"role": "assistant", "content": "Is Lago Investments, LLC a Michigan company?"},
+                    {"role": "user", "content": "yes, Michigan"},
+                ],
+                "draft_id": draft_id,
+            })
+
+        # Verify extract_pa_data was called with existing data context
+        # The last call to the handler LLM should have been for extraction
+        calls = mock_hllm.return_value.invoke.call_args_list
+        last_prompt = calls[-1][0][0][0].content
+        assert "purchaser_name=Lago Investments, LLC" in last_prompt
+
+    @patch(DOCX_PATCH, return_value=b"PK\x03\x04fake")
+    @patch(HANDLER_LLM_PATCH)
+    @patch(GRAPH_LLM_PATCH)
+    def test_edit_prepends_assistant_message(self, mock_gllm, mock_hllm, mock_docx, db_path):
+        """edit_node should prepend last assistant message to user_message."""
+        initial = json.dumps({"purchaser_name": "Test LLC"})
+        edit_result = json.dumps({"purchaser_entity_type": "a Michigan LLC"})
+        mock_hllm.return_value = make_mock_llm(initial)
+        mock_gllm.return_value = make_mock_llm(initial)
+
+        with patch("draft_store.DB_PATH", db_path):
+            from graph import build_graph
+            graph = build_graph()
+
+            result1 = graph.invoke({
+                "command": "create",
+                "user_message": "PA for buyer Test LLC",
+                "chat_history": [],
+                "draft_id": None,
+            })
+            draft_id = result1.get("draft_id")
+
+            mock_hllm.return_value = make_mock_llm(edit_result)
+            mock_gllm.return_value = make_mock_llm('"edit"')
+            result2 = graph.invoke({
+                "command": "continue",
+                "user_message": "yes it is",
+                "chat_history": [
+                    {"role": "assistant", "content": "Is Test LLC a Michigan company?"},
+                    {"role": "user", "content": "yes it is"},
+                ],
+                "draft_id": draft_id,
+            })
+
+        # The extraction prompt should contain the assistant context prefix
+        calls = mock_hllm.return_value.invoke.call_args_list
+        last_prompt = calls[-1][0][0][0].content
+        assert "[Context: assistant just asked:" in last_prompt
+        assert "Is Test LLC a Michigan company?" in last_prompt
+
+    @patch(DOCX_PATCH, return_value=b"PK\x03\x04fake")
+    @patch(HANDLER_LLM_PATCH)
+    @patch(GRAPH_LLM_PATCH)
+    def test_edit_excludes_entities_and_provisions(self, mock_gllm, mock_hllm, mock_docx, db_path):
+        """edit_node should NOT pass exhibit_a_entities or additional_provisions."""
+        initial = json.dumps({
+            "purchaser_name": "Test LLC",
+            "exhibit_a_entities": [{"owner": "Test", "address": "123 Main"}],
+            "additional_provisions": [{"title": "Test", "body": "test body"}],
+        })
+        mock_hllm.return_value = make_mock_llm(initial)
+        mock_gllm.return_value = make_mock_llm(initial)
+
+        with patch("draft_store.DB_PATH", db_path):
+            from graph import build_graph
+            graph = build_graph()
+
+            result1 = graph.invoke({
+                "command": "create",
+                "user_message": "PA for buyer Test LLC, entity at 123 Main",
+                "chat_history": [],
+                "draft_id": None,
+            })
+            draft_id = result1.get("draft_id")
+
+            mock_hllm.return_value = make_mock_llm('{"closing_days": "60"}')
+            mock_gllm.return_value = make_mock_llm('"edit"')
+            result2 = graph.invoke({
+                "command": "continue",
+                "user_message": "close in 60 days",
+                "chat_history": [],
+                "draft_id": draft_id,
+            })
+
+        calls = mock_hllm.return_value.invoke.call_args_list
+        last_prompt = calls[-1][0][0][0].content
+        assert "exhibit_a_entities" not in last_prompt
+        assert "additional_provisions" not in last_prompt
+
+    @patch(DOCX_PATCH, return_value=b"PK\x03\x04fake")
+    @patch(HANDLER_LLM_PATCH)
+    @patch(GRAPH_LLM_PATCH)
+    def test_edit_keeps_false_booleans_in_context(self, mock_gllm, mock_hllm, mock_docx, db_path):
+        """edit_node should include False booleans in context (disambiguation)."""
+        initial = json.dumps({
+            "purchaser_name": "Test LLC",
+            "payment_cash": True,
+            "payment_mortgage": False,
+        })
+        mock_hllm.return_value = make_mock_llm(initial)
+        mock_gllm.return_value = make_mock_llm(initial)
+
+        with patch("draft_store.DB_PATH", db_path):
+            from graph import build_graph
+            graph = build_graph()
+
+            result1 = graph.invoke({
+                "command": "create",
+                "user_message": "PA for buyer Test LLC, cash purchase",
+                "chat_history": [],
+                "draft_id": None,
+            })
+            draft_id = result1.get("draft_id")
+
+            mock_hllm.return_value = make_mock_llm('{"closing_days": "60"}')
+            mock_gllm.return_value = make_mock_llm('"edit"')
+            result2 = graph.invoke({
+                "command": "continue",
+                "user_message": "close in 60 days",
+                "chat_history": [],
+                "draft_id": draft_id,
+            })
+
+        calls = mock_hllm.return_value.invoke.call_args_list
+        last_prompt = calls[-1][0][0][0].content
+        assert "payment_cash=True" in last_prompt
+        assert "payment_mortgage=False" in last_prompt
+
+
+# ===========================================================================
 # Resume Flow
 # ===========================================================================
 

@@ -651,3 +651,112 @@ class TestMixedPaymentFieldsVisibility:
         result = format_remaining_variables(variables)
         for field in self.MIXED_FIELDS:
             assert field not in result.lower(), f"{field} should be hidden"
+
+
+# ===========================================================================
+# extract_pa_data — existing_data context formatting
+# ===========================================================================
+
+class TestExtractContextFormatting:
+    """Tests for compact key=value context formatting in extract_pa_data."""
+
+    def test_existing_data_appears_as_key_value(self):
+        """existing_data should be formatted as key=value lines, not JSON."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{"purchaser_entity_type": "a Michigan LLC"}')
+        existing = {"purchaser_name": "Lago Investments, LLC", "seller_name": "ABC Corp"}
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data("It's a Michigan company", existing_data=existing)
+        # Inspect the prompt sent to the LLM
+        call_args = mock_llm.invoke.call_args[0][0]
+        prompt_text = call_args[0].content
+        assert "purchaser_name=Lago Investments, LLC" in prompt_text
+        assert "seller_name=ABC Corp" in prompt_text
+        # Should NOT be JSON format
+        assert '"purchaser_name"' not in prompt_text
+
+    def test_existing_data_skips_empty_values(self):
+        """None, empty string, and empty list values should be excluded."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{}')
+        existing = {
+            "purchaser_name": "Test LLC",
+            "seller_name": "",
+            "seller_address": None,
+            "exhibit_a_entities": [],
+        }
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data("test", existing_data=existing)
+        prompt_text = mock_llm.invoke.call_args[0][0][0].content
+        assert "purchaser_name=Test LLC" in prompt_text
+        assert "seller_name=" not in prompt_text
+        assert "seller_address=" not in prompt_text
+
+    def test_existing_data_keeps_false_values(self):
+        """Boolean False should be included (important for disambiguation)."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{}')
+        existing = {
+            "payment_cash": True,
+            "payment_mortgage": False,
+            "dd_financing": False,
+        }
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data("test", existing_data=existing)
+        prompt_text = mock_llm.invoke.call_args[0][0][0].content
+        assert "payment_cash=True" in prompt_text
+        assert "payment_mortgage=False" in prompt_text
+        assert "dd_financing=False" in prompt_text
+
+    def test_existing_data_truncates_long_values(self):
+        """Values over 100 chars should be truncated with '...'."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{}')
+        long_desc = "A" * 200
+        existing = {"property_legal_description": long_desc}
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data("test", existing_data=existing)
+        prompt_text = mock_llm.invoke.call_args[0][0][0].content
+        assert "property_legal_description=" + "A" * 100 + "..." in prompt_text
+        assert "A" * 200 not in prompt_text
+
+    def test_existing_data_hard_cap_1500_chars(self):
+        """Total context block should not exceed 1500 chars."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{}')
+        # Create enough fields to exceed 1500 chars
+        existing = {f"field_{i}": "x" * 90 for i in range(30)}
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data("test", existing_data=existing)
+        prompt_text = mock_llm.invoke.call_args[0][0][0].content
+        # Find the context block between "Already known data:\n" and the next "\n\n"
+        start = prompt_text.index("Already known data:\n") + len("Already known data:\n")
+        end = prompt_text.index("\n\n", start)
+        context_block = prompt_text[start:end]
+        assert len(context_block) <= 1500
+
+    def test_assistant_question_instruction_added(self):
+        """When user_message has assistant context prefix, add extraction instruction."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{}')
+        msg = "[Context: assistant just asked: Is Lago Investments a Michigan company?]\n\nUser reply: yes"
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data(msg)
+        prompt_text = mock_llm.invoke.call_args[0][0][0].content
+        assert "Extract variables ONLY from the user's reply" in prompt_text
+
+    def test_no_assistant_instruction_without_prefix(self):
+        """Normal messages should NOT get the assistant-question instruction."""
+        from pa_handler import extract_pa_data
+
+        mock_llm = make_mock_llm('{}')
+        with patch(PATCH_TARGET, return_value=mock_llm):
+            extract_pa_data("The buyer is Acme LLC")
+        prompt_text = mock_llm.invoke.call_args[0][0][0].content
+        assert "Extract variables ONLY from the user's reply" not in prompt_text

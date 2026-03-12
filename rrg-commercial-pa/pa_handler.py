@@ -225,11 +225,28 @@ def extract_pa_data(user_message: str, existing_data: Optional[dict] = None) -> 
     )
 
     if existing_data:
-        prompt += f"Already known data: {json.dumps(existing_data)}\n\n"
+        context_lines = []
+        for k, v in existing_data.items():
+            val_str = str(v)
+            if len(val_str) > 100:
+                val_str = val_str[:100] + "..."
+            context_lines.append(f"{k}={val_str}")
+        context_block = "\n".join(context_lines)
+        # Hard cap to stay within prompt size budget (~1500 chars)
+        if len(context_block) > 1500:
+            context_block = context_block[:1500].rsplit("\n", 1)[0]
+        prompt += f"Already known data:\n{context_block}\n\n"
 
     from datetime import date
     today = date.today()
     prompt += f"Today's date is {today.strftime('%A, %B %d, %Y')}.\n\n"
+
+    if "[Context: assistant just asked:" in user_message:
+        prompt += (
+            "The user message includes the prior assistant question for context. "
+            "Extract variables ONLY from the user's reply, using the assistant "
+            "question only to understand which field is being answered.\n\n"
+        )
 
     prompt += (
         f"User message: {user_message}\n\n"
