@@ -1,6 +1,6 @@
 """LangGraph workflow for commercial purchase agreement generation.
 
-11 nodes: entry, start_new, triage, extract, edit, preview, finalize,
+10 nodes: entry, start_new, triage, edit, preview, finalize,
 save, list_drafts, question, cancel.
 
 Entry point is `build_graph()` which returns a compiled LangGraph.
@@ -285,63 +285,6 @@ def triage_node(state: PaState) -> dict:
     return {"pa_action": action}
 
 
-def extract_node(state: PaState) -> dict:
-    """Extract variables from user input and update the draft."""
-    store = _get_store()
-    draft_id = state.get("draft_id")
-    msg = state.get("user_message", "")
-
-    if not draft_id:
-        return {
-            "response": "No active draft. Use 'create' to start one.",
-            "pa_active": True,
-            "docx_bytes": None,
-            "docx_filename": None,
-        }
-
-    draft = store.load_draft(draft_id)
-    if draft is None:
-        return {
-            "response": "Draft not found.",
-            "pa_active": True,
-            "docx_bytes": None,
-            "docx_filename": None,
-        }
-
-    try:
-        extracted = extract_pa_data(msg, draft.get("variables", {}))
-        if isinstance(extracted, dict) and extracted:
-            store.update_draft(draft_id, extracted)
-    except (json.JSONDecodeError, ValueError, Exception):
-        pass
-
-    # Reload updated draft
-    draft = store.load_draft(draft_id)
-    variables = draft.get("variables", {}) if draft else {}
-
-    filled_summary = format_filled_summary(extracted if isinstance(extracted, dict) else {})
-    remaining = format_remaining_variables(variables)
-    exhibit_a = format_exhibit_a_summary(variables)
-
-    response_parts = []
-    if filled_summary:
-        response_parts.append(filled_summary)
-    if exhibit_a:
-        response_parts.append(exhibit_a)
-    if remaining:
-        response_parts.append(f"Remaining variables to fill:\n{remaining}")
-    if not response_parts:
-        response_parts.append("Variables updated.")
-
-    return {
-        "response": "\n\n".join(response_parts),
-        "draft_id": draft_id,
-        "pa_active": True,
-        "docx_bytes": None,
-        "docx_filename": None,
-    }
-
-
 def edit_node(state: PaState) -> dict:
     """Apply user-requested changes to the existing draft variables."""
     store = _get_store()
@@ -366,20 +309,34 @@ def edit_node(state: PaState) -> dict:
 
     old_variables = dict(draft.get("variables", {}))
     variables = dict(old_variables)
-    try:
-        updated = apply_changes(
-            variables,
-            state.get("user_message", ""),
-            state.get("chat_history"),
-        )
-        if isinstance(updated, dict):
-            # Strip None and empty strings — they mean "not filled"
-            # Keep False, 0, [] so booleans/numbers/entity lists work
-            updated = {k: v for k, v in updated.items() if v is not None and v != ""}
-            store.update_draft(draft_id, updated)
-            variables = updated
-    except Exception as exc:
-        logger.warning("apply_changes failed: %s", exc)
+    msg = state.get("user_message", "")
+    llm_error = False
+
+    # Try apply_changes with one retry on JSON parse failure
+    for attempt in range(2):
+        try:
+            updated = apply_changes(
+                variables,
+                msg,
+                state.get("chat_history"),
+            )
+            if isinstance(updated, dict):
+                # Strip None and empty strings — they mean "not filled"
+                # Keep False, 0, [] so booleans/numbers/entity lists work
+                updated = {k: v for k, v in updated.items() if v is not None and v != ""}
+                store.update_draft(draft_id, updated)
+                variables = updated
+            break  # success
+        except json.JSONDecodeError as exc:
+            if attempt == 0:
+                logger.warning("apply_changes JSON parse failed (retrying): %s", exc)
+                continue  # retry once
+            logger.error("apply_changes JSON parse failed after retry: %s", exc, exc_info=True)
+            llm_error = True
+        except Exception as exc:
+            logger.error("apply_changes failed: %s", exc, exc_info=True)
+            llm_error = True
+            break  # don't retry non-JSON errors
 
     # Show what changed (only real values, not empty/None)
     changed = {}
@@ -393,6 +350,10 @@ def edit_node(state: PaState) -> dict:
         filled = format_filled_summary(changed)
         response_parts.append(
             f"Got it — {count} variable{'s' if count != 1 else ''} updated.\n{filled}"
+        )
+    elif llm_error:
+        response_parts.append(
+            "I had trouble processing that — please try sending it again."
         )
     else:
         response_parts.append("No new variables detected — try rephrasing.")
@@ -640,7 +601,6 @@ def build_graph():
     graph.add_node("entry", entry_node)
     graph.add_node("start_new", start_new_node)
     graph.add_node("triage", triage_node)
-    graph.add_node("extract", extract_node)
     graph.add_node("edit", edit_node)
     graph.add_node("preview", preview_node)
     graph.add_node("finalize", finalize_node)
@@ -671,7 +631,6 @@ def build_graph():
 
     # Terminal nodes — all go to END
     graph.add_edge("start_new", END)
-    graph.add_edge("extract", END)
     graph.add_edge("edit", END)
     graph.add_edge("preview", END)
     graph.add_edge("finalize", END)

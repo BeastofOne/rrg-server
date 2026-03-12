@@ -276,10 +276,11 @@ def apply_changes(
         "'a {State} limited liability company' for LLC, "
         "'a {State} corporation' for Inc/Corp. "
         "Check chat history for which entity was being asked about.\n\n"
-        "Return ONLY a complete JSON object with ALL variables — "
-        "the unchanged ones plus any modified ones. "
+        "Return ONLY a JSON object with the variables that are NEW or CHANGED. "
+        "Do NOT include unchanged variables. "
         "Use ONLY the exact field names listed above (snake_case). "
-        "Preserve all existing values that were not changed."
+        "If the user provides exhibit_a_entities changes, return the complete "
+        "updated list (since it replaces the old list entirely)."
     )
 
     from langchain_core.messages import HumanMessage

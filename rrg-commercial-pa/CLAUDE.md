@@ -5,7 +5,7 @@ Conversational purchase agreement generator for commercial real estate deals. Fl
 
 Extracts ~55 deal variables through conversation, persists drafts in SQLite, and renders `.docx` files via docxtpl.
 
-## LangGraph Workflow (11 nodes)
+## LangGraph Workflow (10 nodes)
 
 ```
 entry → [route_entry] → start_new  → END   (new request or resume)
