@@ -48,7 +48,8 @@ FIELD_GROUPS = [
     ]),
     ("Financial", "purchase price, payment method, earnest money. "
      "purchase_price_words and purchase_price_number are the SAME value in different formats — "
-     "fill BOTH from a single price (words = spelled out, number = formatted). "
+     "fill BOTH from a single price (words = 'One Million Dollars', number = '$1,000,000.00'). "
+     "Number fields MUST include $ sign and .00 cents. "
      "Same for earnest_money_words and earnest_money_number", [
         "purchase_price_words", "purchase_price_number",
         "payment_cash", "payment_mortgage", "payment_land_contract",
