@@ -53,7 +53,7 @@ def exhibit_a_multi_owner(entities: list) -> bool:
 # ---------------------------------------------------------------------------
 
 LC_SUB_FIELDS = frozenset({
-    "lc_down_payment", "lc_balance", "lc_interest_rate",
+    "lc_down_payment", "lc_balance", "lc_interest_rate", "lc_interest_rate_words",
     "lc_amortization_years", "lc_balloon_months",
 })
 

@@ -619,7 +619,7 @@ class TestPaymentFieldVisibility:
         "lc_subordinate",
     }
     LC_SUB_FIELDS = {
-        "lc_down_payment", "lc_balance", "lc_interest_rate",
+        "lc_down_payment", "lc_balance", "lc_interest_rate", "lc_interest_rate_words",
         "lc_amortization_years", "lc_balloon_months",
     }
 

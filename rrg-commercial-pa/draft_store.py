@@ -38,7 +38,7 @@ ALL_VARIABLE_FIELDS = [
     "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
     "lc_pct", "lc_amount_words", "lc_amount_number",
     "lc_subordinate",
-    "lc_down_payment", "lc_balance", "lc_interest_rate",
+    "lc_down_payment", "lc_balance", "lc_interest_rate", "lc_interest_rate_words",
     "lc_amortization_years", "lc_balloon_months",
     "earnest_money_words", "earnest_money_number",
     # Title & Escrow

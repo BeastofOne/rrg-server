@@ -223,6 +223,10 @@ def _build_context(variables: dict) -> dict:
         month = str(ctx["offer_expiration_month"]).strip()
         ctx["offer_expiration_month"] = _MONTH_NAMES.get(month, month)
 
+    # Strip trailing % from interest rate (template adds its own %)
+    if "lc_interest_rate" in ctx:
+        ctx["lc_interest_rate"] = str(ctx["lc_interest_rate"]).strip().rstrip("%").strip()
+
     # Default booleans
     for field in _BOOL_FIELDS:
         if field not in ctx:
