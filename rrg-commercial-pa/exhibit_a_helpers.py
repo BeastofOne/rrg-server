@@ -102,9 +102,11 @@ def compute_payment_excluded_fields(variables: dict) -> set:
         if not (mortgage is True and lc is True):
             excluded |= MIXED_PAYMENT_FIELDS
 
-        # In mixed mode, mortgage IS the down payment
+        # In mixed mode, down payment and balance are not used
+        # (the mixed clause uses lc_amount_words/lc_amount_number instead)
         if mortgage is True and lc is True:
             excluded.add("lc_down_payment")
+            excluded.add("lc_balance")
     else:
         # No method selected yet — only hide mixed fields (structurally
         # irrelevant until both mortgage+LC are explicitly selected)

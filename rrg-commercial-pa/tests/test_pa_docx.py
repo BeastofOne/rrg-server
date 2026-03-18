@@ -821,11 +821,11 @@ class TestComputePaymentExcludedFields:
         result = compute_payment_excluded_fields({"payment_mortgage": True, "payment_land_contract": True})
         assert "payment_cash" in result
         assert "lc_down_payment" in result
+        assert "lc_balance" in result  # balance not used in mixed clause
         # Mixed fields should NOT be excluded (both methods selected)
         assert "mortgage_pct" not in result
         assert "lc_pct" not in result
         # Other LC sub-fields should NOT be excluded
-        assert "lc_balance" not in result
         assert "lc_interest_rate" not in result
 
     def test_none_vs_false_distinction(self):
@@ -845,8 +845,9 @@ class TestComputePaymentExcludedFields:
         assert "payment_cash" not in result
         assert "payment_mortgage" not in result
         assert "payment_land_contract" not in result
-        # lc_down_payment excluded (mixed mode)
+        # lc_down_payment and lc_balance excluded (mixed mode)
         assert "lc_down_payment" in result
+        assert "lc_balance" in result
 
 
 # ===========================================================================
