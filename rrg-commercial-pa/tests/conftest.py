@@ -288,7 +288,7 @@ ALL_VARIABLE_FIELDS = [
     # Closing
     "closing_days", "closing_days_words",
     # Broker
-    "broker_name", "broker_commission_pct", "broker_commission_amount",
+    "broker_name", "broker_commission_description",
     "seller_broker_name", "seller_broker_company",
     # Offer Expiration
     "offer_expiration_time", "offer_expiration_ampm",

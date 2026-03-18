@@ -729,6 +729,7 @@ class TestPaymentFieldVisibility:
         result = format_remaining_variables(variables)
         assert "Down Payment" in result
         assert "Balance" in result
+        assert "Interest Rate" in result
 
     def test_lc_only_hides_mixed_fields(self):
         """LC=True, mortgage=False → mixed fields hidden."""

@@ -69,7 +69,8 @@ FIELD_GROUPS = [
      "amount_number includes $ and .00. "
      "lc_subordinate (bool) = whether the land contract is subordinate to the mortgage. "
      "lc_interest_rate = just the number (e.g. '5', not '5%'). "
-     "lc_interest_rate_words = spelled out in lowercase (e.g. 'five')", [
+     "lc_interest_rate and lc_interest_rate_words are the SAME value in different formats — "
+     "fill BOTH from a single interest rate (e.g. rate='5', words='five')", [
         "purchase_price_words", "purchase_price_number",
         "payment_cash", "payment_mortgage", "payment_land_contract",
         "mortgage_pct", "mortgage_amount_words", "mortgage_amount_number",
@@ -127,6 +128,7 @@ _DISPLAY_LABELS = {
     "lc_pct": "Land Contract Percentage",
     "lc_subordinate": "Land Contract Subordinate to Mortgage?",
     "offer_expiration_ampm": "AM/PM",
+    "lc_interest_rate_words": "Interest Rate (Words)",
 }
 
 # Fields covered by Exhibit A when active (2+ entities)
