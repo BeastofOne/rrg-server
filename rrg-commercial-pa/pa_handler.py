@@ -123,6 +123,7 @@ _DISPLAY_LABELS = {
     "mortgage_pct": "Mortgage Percentage",
     "lc_pct": "Land Contract Percentage",
     "lc_subordinate": "Land Contract Subordinate to Mortgage?",
+    "offer_expiration_ampm": "AM/PM",
 }
 
 # Fields covered by Exhibit A when active (2+ entities)
