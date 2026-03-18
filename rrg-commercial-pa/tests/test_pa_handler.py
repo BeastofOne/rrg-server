@@ -762,6 +762,14 @@ class TestPaymentFieldVisibility:
         assert "Balance" not in result  # balance only in standalone LC clause
         assert "Interest Rate" in result
 
+    def test_both_collapses_interest_rate_pair(self):
+        """Mortgage+LC → 'Interest Rate' shown once, not separate rate + words lines."""
+        from pa_handler import format_remaining_variables
+        variables = {"payment_mortgage": True, "payment_land_contract": True}
+        result = format_remaining_variables(variables)
+        assert "Interest Rate" in result
+        assert "Interest Rate Words" not in result
+
     def test_both_shows_mixed_fields(self):
         """Mortgage+LC → mixed-payment fields visible."""
         from pa_handler import format_remaining_variables
