@@ -532,7 +532,7 @@ def format_filled_summary(extracted: dict) -> str:
             continue
         lines = [f"**{group_name}:**"]
         for field in group_filled:
-            label = _strip_group_prefix(field, group_name)
+            label = _DISPLAY_LABELS.get(field) or _strip_group_prefix(field, group_name)
             lines.append(f"- **{label}:** {extracted[field]}")
         sections.append("\n".join(lines))
 
