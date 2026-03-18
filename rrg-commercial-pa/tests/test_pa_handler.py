@@ -746,11 +746,11 @@ class TestPaymentFieldVisibility:
         assert "down payment" not in result.lower()
 
     def test_both_shows_other_lc_sub_fields(self):
-        """Mortgage+LC → balance, interest, amortization, balloon still visible."""
+        """Mortgage+LC → interest, amortization, balloon visible; balance hidden."""
         from pa_handler import format_remaining_variables
         variables = {"payment_mortgage": True, "payment_land_contract": True}
         result = format_remaining_variables(variables)
-        assert "Balance" in result
+        assert "Balance" not in result  # balance only in standalone LC clause
         assert "Interest Rate" in result
 
     def test_both_shows_mixed_fields(self):
