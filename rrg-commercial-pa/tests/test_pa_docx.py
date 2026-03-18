@@ -568,6 +568,44 @@ class TestExhibitANewColumns:
 
 
 # ===========================================================================
+# Build Context — Interest Rate normalization
+# ===========================================================================
+
+class TestBuildContextInterestRate:
+    """Tests that _build_context strips % from lc_interest_rate."""
+
+    def test_plain_number_unchanged(self):
+        from pa_docx import _build_context
+        ctx = _build_context({"lc_interest_rate": "5"})
+        assert ctx["lc_interest_rate"] == "5"
+
+    def test_trailing_percent_stripped(self):
+        from pa_docx import _build_context
+        ctx = _build_context({"lc_interest_rate": "5%"})
+        assert ctx["lc_interest_rate"] == "5"
+
+    def test_trailing_percent_with_space_stripped(self):
+        from pa_docx import _build_context
+        ctx = _build_context({"lc_interest_rate": "5 %"})
+        assert ctx["lc_interest_rate"] == "5"
+
+    def test_numeric_input_converted_to_string(self):
+        from pa_docx import _build_context
+        ctx = _build_context({"lc_interest_rate": 6.5})
+        assert ctx["lc_interest_rate"] == "6.5"
+
+    def test_double_percent_stripped(self):
+        from pa_docx import _build_context
+        ctx = _build_context({"lc_interest_rate": "5%%"})
+        assert ctx["lc_interest_rate"] == "5"
+
+    def test_missing_field_no_error(self):
+        from pa_docx import _build_context
+        ctx = _build_context({"seller_name": "Test"})
+        assert "lc_interest_rate" not in ctx
+
+
+# ===========================================================================
 # Build Context — Exhibit A integration
 # ===========================================================================
 
