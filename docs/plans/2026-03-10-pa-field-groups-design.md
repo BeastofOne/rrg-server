@@ -28,7 +28,7 @@ Organize the 68 fields into named groups with descriptions. Use the groups in tw
 | Due Diligence | Contingencies and inspection terms | `dd_financing`, `dd_financing_days`, `dd_physical_inspection`, `dd_environmental`, `dd_soil_tests`, `dd_zoning`, `dd_site_plan`, `dd_survey`, `dd_leases_estoppel`, `dd_other`, `dd_other_description`, `dd_governmental`, `inspection_period_days` |
 | Closing | Closing timeline | `closing_days`, `closing_days_words` |
 | Broker | Broker names and commission | `broker_name`, `broker_commission_pct`, `broker_commission_amount`, `seller_broker_name`, `seller_broker_company` |
-| Offer Expiration | When the offer expires | `offer_expiration_time`, `offer_expiration_ampm`, `offer_expiration_day`, `offer_expiration_year` |
+| Offer Expiration | When the offer expires | `offer_expiration_time`, `offer_expiration_ampm`, `offer_expiration_month`, `offer_expiration_day`, `offer_expiration_year` |
 
 ## LLM Prompt Format
 

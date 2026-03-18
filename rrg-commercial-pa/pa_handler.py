@@ -97,7 +97,9 @@ FIELD_GROUPS = [
         "broker_name", "broker_commission_description",
         "seller_broker_name", "seller_broker_company",
     ]),
-    ("Offer Expiration", "when the offer expires", [
+    ("Offer Expiration", "when the offer expires. "
+     "offer_expiration_month must be the full month name (e.g. 'March', not '3' or '03'). "
+     "offer_expiration_day should be ordinal (e.g. '20th', '1st')", [
         "offer_expiration_time", "offer_expiration_ampm",
         "offer_expiration_month", "offer_expiration_day", "offer_expiration_year",
     ]),

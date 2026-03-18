@@ -140,7 +140,8 @@ The source template (`2026_0306_Commercial_PA_283 Unit Portfolio_Pontiac.docx`) 
 |----------|------|-------------|
 | `offer_expiration_time` | str | Hour |
 | `offer_expiration_ampm` | str | AM/PM |
-| `offer_expiration_day` | str | Day and date |
+| `offer_expiration_month` | str | Full month name (e.g. "March") |
+| `offer_expiration_day` | str | Ordinal day (e.g. "20th") |
 | `offer_expiration_year` | str | Year |
 
 ### Additional Provisions

@@ -216,6 +216,13 @@ def _build_context(variables: dict) -> dict:
         month = str(ctx["effective_date_month"]).strip()
         ctx["effective_date_month"] = _MONTH_NAMES.get(month, month)
 
+    # Normalize offer expiration date formats
+    if "offer_expiration_day" in ctx:
+        ctx["offer_expiration_day"] = _ordinal(str(ctx["offer_expiration_day"]))
+    if "offer_expiration_month" in ctx:
+        month = str(ctx["offer_expiration_month"]).strip()
+        ctx["offer_expiration_month"] = _MONTH_NAMES.get(month, month)
+
     # Default booleans
     for field in _BOOL_FIELDS:
         if field not in ctx:
