@@ -118,6 +118,7 @@ DISPLAY_PAIRS = {
     ("closing_days", "closing_days_words"): "Closing Days",
     ("mortgage_amount_words", "mortgage_amount_number"): "Mortgage Amount",
     ("lc_amount_words", "lc_amount_number"): "Land Contract Amount",
+    ("lc_interest_rate", "lc_interest_rate_words"): "Interest Rate",
 }
 
 # Custom display labels for fields whose auto-generated labels are ambiguous
