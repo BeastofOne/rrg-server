@@ -99,7 +99,7 @@ FIELD_GROUPS = [
     ]),
     ("Offer Expiration", "when the offer expires", [
         "offer_expiration_time", "offer_expiration_ampm",
-        "offer_expiration_day", "offer_expiration_year",
+        "offer_expiration_month", "offer_expiration_day", "offer_expiration_year",
     ]),
 ]
 

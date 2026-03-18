@@ -57,7 +57,7 @@ ALL_VARIABLE_FIELDS = [
     "seller_broker_name", "seller_broker_company",
     # Offer Expiration
     "offer_expiration_time", "offer_expiration_ampm",
-    "offer_expiration_day", "offer_expiration_year",
+    "offer_expiration_month", "offer_expiration_day", "offer_expiration_year",
 ]
 
 

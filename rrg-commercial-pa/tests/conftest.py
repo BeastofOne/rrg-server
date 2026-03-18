@@ -156,7 +156,8 @@ def complete_variables():
         # Offer Expiration
         "offer_expiration_time": "5:00",
         "offer_expiration_ampm": "PM",
-        "offer_expiration_day": "Friday, March 20",
+        "offer_expiration_month": "March",
+        "offer_expiration_day": "20th",
         "offer_expiration_year": "2026",
     }
 
@@ -290,5 +291,5 @@ ALL_VARIABLE_FIELDS = [
     "seller_broker_name", "seller_broker_company",
     # Offer Expiration
     "offer_expiration_time", "offer_expiration_ampm",
-    "offer_expiration_day", "offer_expiration_year",
+    "offer_expiration_month", "offer_expiration_day", "offer_expiration_year",
 ]
