@@ -400,6 +400,15 @@ class TestFormatFilledSummary:
         assert isinstance(result, str)
         assert len(result) > 0
 
+    def test_display_labels_used_for_known_fields(self):
+        """Fields in _DISPLAY_LABELS should use the custom label, not auto-stripped."""
+        from pa_handler import format_filled_summary
+
+        result = format_filled_summary({"mortgage_pct": "60"})
+        assert "Mortgage Percentage" in result
+        # Should NOT fall back to the auto-stripped "Pct" label
+        assert "- **Pct:**" not in result
+
     def test_does_not_include_none_values(self):
         """Should not show variables that are None in the summary."""
         from pa_handler import format_filled_summary

@@ -74,7 +74,8 @@ def compute_payment_excluded_fields(variables: dict) -> set:
     - When any payment method is True, hide the booleans for unselected methods
     - When LC is not selected, hide all LC sub-fields
     - Mixed-payment fields only shown when BOTH mortgage AND LC are True
-    - In mixed mode, lc_down_payment hidden (mortgage IS the down payment)
+    - In mixed mode, lc_down_payment and lc_balance hidden (mixed clause
+      uses lc_amount_words/lc_amount_number instead)
     - When nothing is selected, only mixed-payment fields are hidden
     """
     excluded = set()
