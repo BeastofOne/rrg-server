@@ -529,7 +529,8 @@
       "WebFetch(domain:www.mortgagenewsdaily.com)",
       "WebFetch(domain:support.claude.com)",
       "WebFetch(domain:woodhavenreserve.com)",
-      "WebFetch(domain:www.discoverdownriver.com)"
+      "WebFetch(domain:www.discoverdownriver.com)",
+      "Bash(pip3 show google-auth-oauthlib 2>/dev/null | head -3 || echo \"NOT INSTALLED\")"
     ]
   },
   "enableAllProjectMcpServers": true,
