@@ -2,8 +2,8 @@
 # Path: f/switchboard/check_gmail_watch_health
 #
 # Checks that gmail_pubsub_webhook has run recently (within 48 hours).
-# If stale, ATTEMPTS to re-register both Gmail watches before alerting.
-# Only alerts Jake if the self-heal fails (e.g., revoked OAuth token).
+# If stale, queues async watch renewals and alerts Jake.
+# Always alerts on staleness so Jake can monitor; renewal runs after this job frees the worker.
 #
 # Monitors BOTH accounts:
 # - teamgotcher@gmail.com (SENT + INBOX watch)
@@ -41,10 +41,12 @@ def main():
         return {"status": "error", "error": str(e)}
 
     if hours_since is None:
-        # No successful webhook jobs ever
+        # No successful webhook jobs ever — queue renewals and alert
         results = attempt_self_heal(token)
-        if all(r["success"] for r in results):
-            return {"status": "self_healed", "reason": "no_jobs_found", "renewals": results}
+        any_queued = any(r["success"] for r in results)
+        if any_queued:
+            send_alert(sms_url, "No prior webhook jobs found. Auto-renewal queued — check back in 10 min.")
+            return {"status": "renewal_queued", "reason": "no_jobs_found", "renewals": results}
         send_alert(sms_url, format_failure_alert(results, reason="no prior webhook jobs"))
         return {"status": "alert_sent", "reason": "no_jobs_found", "renewals": results}
 
@@ -110,13 +112,12 @@ def check_webhook_staleness(token):
 
 
 def attempt_self_heal(token):
-    """Trigger both watch renewal scripts async, then poll for results.
+    """Queue both watch renewal scripts as async jobs.
 
     Uses async job submission (not run_wait_result) to avoid deadlocking
     the single Windmill worker — this script holds the worker while running,
     so synchronous sub-jobs would never get picked up.
     """
-    import time
 
     headers = {
         "Authorization": f"Bearer {token}",

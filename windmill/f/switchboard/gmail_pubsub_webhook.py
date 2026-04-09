@@ -694,6 +694,10 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
     if not email and not name:
         return None
 
+    # Clean up formal municipality names before building result
+    if property_name:
+        property_name = clean_municipality_name(property_name)
+
     result = {
         "name": name,
         "email": email,
@@ -702,13 +706,9 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
         "source_type": "social_connect",
         "lead_type": lead_type,
         "property_name": property_name,
+        "property_address": property_name,
         "notification_message_id": msg_id
     }
-    # Clean up formal municipality names in property address
-    if property_name:
-        property_name = clean_municipality_name(property_name)
-        result["property_name"] = property_name
-        result["property_address"] = property_name
     return result
 
 
