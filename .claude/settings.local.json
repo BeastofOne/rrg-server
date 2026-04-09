@@ -554,7 +554,10 @@
       "Bash(adb push /tmp/termux-apks/gateway.py /sdcard/gateway.py 2>&1 && adb push /tmp/termux-apks/boot-start.sh /sdcard/boot-start.sh 2>&1)",
       "Bash(adb shell input text 'pkg%supdate%s-y%s\\\\&\\\\&%spkg%sinstall%stermux-api%s-y' && adb shell input keyevent 66)",
       "Bash(adb push /tmp/termux-apks/setup.sh /sdcard/setup.sh 2>&1)",
-      "Bash(adb shell \"cat /sdcard/setup.sh\" 2>&1 | head -5)"
+      "Bash(adb shell \"cat /sdcard/setup.sh\" 2>&1 | head -5)",
+      "Bash(adb shell \"curl -s http://localhost:8686/health\" 2>&1)",
+      "Bash(adb shell \"input text 'pkg%sinstall%spython%s-y' && input keyevent 66\" 2>&1)",
+      "Bash(adb shell \"am start -n com.termux/.app.TermuxActivity\" 2>&1)"
     ]
   },
   "enableAllProjectMcpServers": true,
