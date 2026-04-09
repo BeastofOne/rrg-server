@@ -530,7 +530,9 @@
       "WebFetch(domain:support.claude.com)",
       "WebFetch(domain:woodhavenreserve.com)",
       "WebFetch(domain:www.discoverdownriver.com)",
-      "Bash(pip3 show google-auth-oauthlib 2>/dev/null | head -3 || echo \"NOT INSTALLED\")"
+      "Bash(pip3 show google-auth-oauthlib 2>/dev/null | head -3 || echo \"NOT INSTALLED\")",
+      "Bash(git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch get_gmail_token.py' --prune-empty -- origin/main..HEAD 2>&1)",
+      "Bash(git stash && FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch get_gmail_token.py' --prune-empty -- origin/main..HEAD 2>&1)"
     ]
   },
   "enableAllProjectMcpServers": true,
