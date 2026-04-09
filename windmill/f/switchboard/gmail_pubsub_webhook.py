@@ -332,6 +332,23 @@ def schedule_delayed_processing(email):
 # Email categorization
 # ============================================================
 
+# Municipality suffixes that Social Connect / MLS data appends to city names.
+# Map formal names to common names used in conversation and templates.
+_MUNICIPALITY_REPLACEMENTS = [
+    ("Ann Arbor City", "Ann Arbor"),
+    ("Ferndale City", "Ferndale"),
+    ("Ypsilanti Charter Township", "Ypsilanti"),
+    ("Maybee Village", "Maybee"),
+]
+
+
+def clean_municipality_name(address):
+    """Strip formal municipality suffixes from property addresses."""
+    for formal, common in _MUNICIPALITY_REPLACEMENTS:
+        address = address.replace(formal, common)
+    return address
+
+
 def categorize_email(sender, subject):
     """Categorize an email by sender/subject patterns.
 
@@ -687,8 +704,10 @@ def parse_social_connect_lead(service, msg_id, sender, subject):
         "property_name": property_name,
         "notification_message_id": msg_id
     }
-    # Social Connect "Property" field contains a street address
+    # Clean up formal municipality names in property address
     if property_name:
+        property_name = clean_municipality_name(property_name)
+        result["property_name"] = property_name
         result["property_address"] = property_name
     return result
 
