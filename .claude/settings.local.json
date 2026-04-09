@@ -544,7 +544,8 @@
       "Bash(adb shell am start -a android.intent.action.VIEW -d \"market://details?id=me.capcom.smsgateway\" 2>&1)",
       "Bash(adb shell pm list packages 2>/dev/null | grep -E \"capcom|tailscale\")",
       "Bash(adb shell ip addr show tailscale0 2>/dev/null | grep \"inet \")",
-      "Bash(adb shell ifconfig tailscale0 2>/dev/null || adb shell cat /proc/net/if_inet6 2>/dev/null | grep tailscale || echo \"no tailscale interface found\")"
+      "Bash(adb shell ifconfig tailscale0 2>/dev/null || adb shell cat /proc/net/if_inet6 2>/dev/null | grep tailscale || echo \"no tailscale interface found\")",
+      "Bash(mkdir -p /tmp/termux-apks && cd /tmp/termux-apks && curl -L -o termux.apk \"https://f-droid.org/repo/com.termux_1000.apk\" -w \"\\\\nHTTP %{http_code}, size: %{size_download}\\\\n\" 2>&1 | tail -5)"
     ]
   },
   "enableAllProjectMcpServers": true,
