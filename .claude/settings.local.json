@@ -560,7 +560,10 @@
       "Bash(adb shell \"am start -n com.termux/.app.TermuxActivity\" 2>&1)",
       "Bash(adb shell pm list packages 2>&1 | grep -i tailscale)",
       "Bash(adb shell ip addr show tailscale0 2>&1)",
-      "Bash(adb shell ip addr show tun0 2>&1)"
+      "Bash(adb shell ip addr show tun0 2>&1)",
+      "Bash(adb shell pm list packages 2>&1 | grep -i -E \"smsgate|sms.gate|sms_gate\")",
+      "Bash(adb shell pm list packages 2>&1 | grep -i sms)",
+      "Bash(adb shell pm list packages 2>&1)"
     ]
   },
   "enableAllProjectMcpServers": true,
