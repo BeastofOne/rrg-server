@@ -539,7 +539,8 @@
       "Bash(adb shell pm list packages 2>/dev/null | grep -iE \"termux|fdroid|f.droid\")",
       "Bash(adb shell getprop ro.product.model 2>/dev/null)",
       "Bash(adb shell settings get global install_non_market_apps 2>/dev/null; adb shell cmd package install-existing com.android.vending 2>/dev/null; adb shell pm list packages -3 2>/dev/null | head -20)",
-      "Bash(adb install /tmp/fdroid.apk 2>&1)"
+      "Bash(adb install /tmp/fdroid.apk 2>&1)",
+      "Bash(adb shell pm list packages 2>/dev/null | grep capcom)"
     ]
   },
   "enableAllProjectMcpServers": true,
