@@ -173,15 +173,34 @@ def main(resume_payload: dict, response_data: dict):
 
         # SMS first (so we know outcome for CRM note)
         SMS_GATEWAY_COMMERCIAL = wmill.get_variable("f/switchboard/sms_gateway_url")
-        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential") or SMS_GATEWAY_COMMERCIAL
+        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential") or ""
         RESIDENTIAL_SOURCES = {"realtor_com", "seller_hub", "social_connect", "upnest"}
         sms_results = []
+
+        def send_sms_commercial(url, phone_e164, body):
+            """Pixel 9a — Termux+Flask API."""
+            resp = requests.post(url, json={"phone": phone_e164, "message": body}, timeout=30)
+            data = resp.json()
+            return data.get("success", False), data.get("error", "unknown")
+
+        def send_sms_residential(url, phone_e164, body):
+            """SM-S918U — SMSGate API (Basic Auth, different payload)."""
+            resp = requests.post(
+                url,
+                json={"textMessage": {"text": body}, "phoneNumbers": [phone_e164]},
+                auth=("sms", wmill.get_variable("f/switchboard/sms_gateway_residential_password")),
+                timeout=30
+            )
+            if resp.status_code in (200, 201, 202):
+                return True, None
+            data = resp.json()
+            return False, data.get("message", f"HTTP {resp.status_code}")
 
         for draft in drafts:
             sms_body = draft.get("sms_body")
             phone = draft.get("phone", "")
             source_type = draft.get("source_type", "")
-            gateway_url = SMS_GATEWAY_RESIDENTIAL if source_type in RESIDENTIAL_SOURCES else SMS_GATEWAY_COMMERCIAL
+            use_residential = source_type in RESIDENTIAL_SOURCES and SMS_GATEWAY_RESIDENTIAL
 
             if not sms_body or not phone:
                 sms_results.append({"sms_sent": False, "reason": "no_phone_or_body"})
@@ -196,21 +215,19 @@ def main(resume_payload: dict, response_data: dict):
                 phone_e164 = phone
 
             try:
-                sms_resp = requests.post(
-                    gateway_url,
-                    json={"phone": phone_e164, "message": sms_body},
-                    timeout=30
-                )
-                sms_data = sms_resp.json()
-                sms_results.append({
-                    "phone": phone_e164,
-                    "sms_sent": sms_data.get("success", False),
-                    "error": sms_data.get("error") if not sms_data.get("success") else None
-                })
+                if use_residential:
+                    success, error = send_sms_residential(SMS_GATEWAY_RESIDENTIAL, phone_e164, sms_body)
+                else:
+                    success, error = send_sms_commercial(SMS_GATEWAY_COMMERCIAL, phone_e164, sms_body)
+
+                if success:
+                    sms_results.append({"phone": phone_e164, "sms_sent": True})
+                else:
+                    sms_results.append({"phone": phone_e164, "sms_sent": False, "error": error})
             except Exception as e:
                 sms_results.append({"phone": phone_e164, "sms_sent": False, "error": str(e)})
                 # Alert Jake via commercial gateway (Pixel 9a) if residential gateway fails
-                if source_type in RESIDENTIAL_SOURCES:
+                if use_residential:
                     try:
                         requests.post(
                             SMS_GATEWAY_COMMERCIAL,
