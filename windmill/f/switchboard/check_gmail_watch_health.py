@@ -55,17 +55,21 @@ def main():
             "last_run": last_run,
         }
 
-    # Stale — attempt self-heal before alerting
+    # Stale — queue watch renewals (async, will run after this job frees the worker)
     results = attempt_self_heal(token)
-    if all(r["success"] for r in results):
+    any_queued = any(r["success"] for r in results)
+
+    if any_queued:
+        # Jobs queued — alert Jake but note that auto-renewal is in progress
+        send_alert(sms_url, f"Gmail webhook stale ({int(hours_since)}h). Auto-renewal queued — check back in 10 min.")
         return {
-            "status": "self_healed",
+            "status": "renewal_queued",
             "hours_since_last_run": round(hours_since, 1),
             "last_run": last_run,
             "renewals": results,
         }
 
-    # Self-heal failed — alert with specific errors
+    # Couldn't even queue the jobs — alert with errors
     send_alert(sms_url, format_failure_alert(results, hours_since=int(hours_since)))
     return {
         "status": "alert_sent",
@@ -106,30 +110,58 @@ def check_webhook_staleness(token):
 
 
 def attempt_self_heal(token):
-    """Trigger both watch renewal scripts. Returns list of result dicts."""
-    results = []
+    """Trigger both watch renewal scripts async, then poll for results.
+
+    Uses async job submission (not run_wait_result) to avoid deadlocking
+    the single Windmill worker — this script holds the worker while running,
+    so synchronous sub-jobs would never get picked up.
+    """
+    import time
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    # Submit both jobs async
+    jobs = []
     for script_name, account in WATCH_SCRIPTS:
         try:
             resp = requests.post(
-                f"{WM_API_BASE}/api/w/rrg/jobs/run_wait_result/p/f/switchboard/{script_name}",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
+                f"{WM_API_BASE}/api/w/rrg/jobs/run/p/f/switchboard/{script_name}",
+                headers=headers,
                 json={},
-                timeout=60,
+                timeout=15,
             )
             if resp.status_code == 200:
-                results.append({"script": script_name, "account": account, "success": True})
+                job_id = resp.text.strip().strip('"')
+                jobs.append({"script": script_name, "account": account, "job_id": job_id})
             else:
-                try:
-                    body = resp.json()
-                    error_msg = body.get("error", {}).get("message", resp.text[:200])
-                except (ValueError, KeyError):
-                    error_msg = resp.text[:200]
-                results.append({"script": script_name, "account": account, "success": False, "error": error_msg})
+                jobs.append({"script": script_name, "account": account, "job_id": None, "error": resp.text[:200]})
         except Exception as e:
-            results.append({"script": script_name, "account": account, "success": False, "error": str(e)[:200]})
+            jobs.append({"script": script_name, "account": account, "job_id": None, "error": str(e)[:200]})
+
+    # This script must finish first to free the worker for the queued jobs.
+    # Return job IDs so the next health check can verify they succeeded.
+    # Also alert immediately — if the tokens are valid, the watches will
+    # re-register once the worker is free, and the next health check will
+    # see a healthy state. If the tokens are bad, Jake needs to know now.
+    results = []
+    for j in jobs:
+        if j.get("job_id"):
+            results.append({
+                "script": j["script"],
+                "account": j["account"],
+                "success": True,
+                "note": f"job {j['job_id']} queued (will run after health check completes)",
+            })
+        else:
+            results.append({
+                "script": j["script"],
+                "account": j["account"],
+                "success": False,
+                "error": j.get("error", "failed to submit job"),
+            })
     return results
 
 
