@@ -22,10 +22,11 @@ rrg-server/
 
 ## System Architecture
 
-**Four machines on Tailscale** (details → `.claude/rules/network.md`):
+**Five machines on Tailscale** (details → `.claude/rules/network.md`):
 - **jake-macbook** — Claude Code
 - **rrg-server** — Docker containers (pnl, brochure, commercial-pa, router), Windmill, Postgres, DocuSeal
-- **pixel-9a** — SMS gateway (Termux + Flask, port 8686)
+- **pixel-9a** — Commercial SMS gateway (Termux + Flask, port 8686)
+- **resource-realty---residential** — Residential SMS gateway (SMSGate, SM-S918U, port 8080)
 - **larry-sms-gateway** — iMessage relay
 
 **Two-machine sync:** `rrg-sync.sh` runs on 5-min cron on both machines. Changes auto-commit and push/pull via GitHub. Windmill flows sync hourly.
