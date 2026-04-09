@@ -103,7 +103,17 @@ def strip_html(text):
 
 
 def get_body_from_payload(payload):
-    """Recursively extract plain text body from a Gmail message payload."""
+    """Recursively extract plain text body from a Gmail message payload.
+
+    Normalizes \\r out of all returned text so parsers can rely on \\n line
+    endings (some emails arrive with \\r\\r\\n separators).
+    """
+    body = _extract_body(payload)
+    return body.replace('\r', '')
+
+
+def _extract_body(payload):
+    """Inner recursive extraction (before \\r normalization)."""
     mime_type = payload.get("mimeType", "")
     if mime_type == "text/plain" and "body" in payload:
         data = payload["body"].get("data", "")
@@ -129,7 +139,7 @@ def get_body_from_payload(payload):
                 return strip_html(html_text)
     for part in parts:
         if part.get("mimeType", "").startswith("multipart/"):
-            result = get_body_from_payload(part)
+            result = _extract_body(part)
             if result:
                 return result
     return ""
@@ -798,7 +808,6 @@ def parse_realtor_com_lead(service, msg_id, sender, subject):
     """
     msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
     body = get_body_from_payload(msg.get('payload', {}))
-    body = body.replace('\r', '')  # normalize line endings (\r\r\n → \n)
 
     # First Name + Last Name
     first_name = ""
