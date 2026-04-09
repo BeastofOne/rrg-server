@@ -1157,13 +1157,27 @@ def main(message: dict = None):
 
     # 4. Skip stale retried messages (Pub/Sub redelivers old messages with old historyIds)
     try:
-        if int(new_history_id) <= int(last_history):
+        new_id_int = int(new_history_id)
+        last_id_int = int(last_history)
+        if new_id_int <= last_id_int:
             return {
                 "skipped": True,
                 "reason": "stale_history_id",
                 "account": source_account,
                 "message_history_id": new_history_id,
                 "current_cursor": last_history
+            }
+        # Guard: reject absurdly large jumps (e.g. Gmail sending historyId=99999999)
+        # Normal jumps are <1000 per notification; 100k+ means something is very wrong
+        MAX_HISTORY_JUMP = 100_000
+        if last_id_int > 0 and (new_id_int - last_id_int) > MAX_HISTORY_JUMP:
+            return {
+                "skipped": True,
+                "reason": "suspicious_history_jump",
+                "account": source_account,
+                "message_history_id": new_history_id,
+                "current_cursor": last_history,
+                "jump": new_id_int - last_id_int
             }
     except (ValueError, TypeError):
         pass  # Non-numeric IDs — proceed normally
