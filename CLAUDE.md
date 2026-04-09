@@ -51,7 +51,7 @@ rrg-server/
 ## Windmill Resources & Variables
 
 Resources: `wiseagent_oauth`, `gmail_oauth`, `gmail_leads_oauth`, `pg`, `tailscale_machines`
-Variables: `property_mapping`, `gmail_last_history_id`, `gmail_leads_last_history_id`, `sms_gateway_url`, `router_token`, `email_signatures`
+Variables: `property_mapping`, `gmail_last_history_id`, `gmail_leads_last_history_id`, `sms_gateway_url`, `sms_gateway_url_residential`, `sms_gateway_residential_password` (secret), `router_token`, `email_signatures`
 (All under `f/switchboard/` namespace)
 
 **Lead sources & signers:**

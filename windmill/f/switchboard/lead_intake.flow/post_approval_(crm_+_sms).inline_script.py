@@ -176,13 +176,18 @@ def main(resume_payload: dict, draft_data: dict):
         # BUG 10 fix: Run SMS loop FIRST so we know outcomes before writing CRM notes
         SMS_GATEWAY_COMMERCIAL = wmill.get_variable("f/switchboard/sms_gateway_url")
         SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential") or ""
+        SMS_RESIDENTIAL_PASSWORD = wmill.get_variable("f/switchboard/sms_gateway_residential_password") if SMS_GATEWAY_RESIDENTIAL else ""
+        # Keep in sync with lead_conversation.flow/post_approval
         RESIDENTIAL_SOURCES = {"realtor_com", "seller_hub", "social_connect", "upnest"}
         sms_results = []
 
         def send_sms_commercial(url, phone_e164, body):
             """Pixel 9a — Termux+Flask API."""
             resp = requests.post(url, json={"phone": phone_e164, "message": body}, timeout=30)
-            data = resp.json()
+            try:
+                data = resp.json()
+            except Exception:
+                return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
             return data.get("success", False), data.get("error", "unknown")
 
         def send_sms_residential(url, phone_e164, body):
@@ -190,13 +195,16 @@ def main(resume_payload: dict, draft_data: dict):
             resp = requests.post(
                 url,
                 json={"textMessage": {"text": body}, "phoneNumbers": [phone_e164]},
-                auth=("sms", wmill.get_variable("f/switchboard/sms_gateway_residential_password")),
+                auth=("sms", SMS_RESIDENTIAL_PASSWORD),
                 timeout=30
             )
             if resp.status_code in (200, 201, 202):
                 return True, None
-            data = resp.json()
-            return False, data.get("message", f"HTTP {resp.status_code}")
+            try:
+                data = resp.json()
+                return False, data.get("message", f"HTTP {resp.status_code}")
+            except Exception:
+                return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
 
         for draft in drafts:
             sms_body = draft.get("sms_body")

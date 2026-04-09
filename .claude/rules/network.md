@@ -4,14 +4,16 @@
 | Machine | IP | SSH User | Role |
 |---------|-----|----------|------|
 | jake-macbook | 100.108.74.112 | jacobphillips | Claude Code |
-| pixel-9a | 100.125.176.16 | — | SMS gateway (Termux + Flask, Crexi/LoopNet leads only) |
+| pixel-9a | 100.125.176.16 | — | Commercial SMS gateway (Termux + Flask) |
+| resource-realty---residential | 100.67.226.97 | — | Residential SMS gateway (SMSGate app, SM-S918U) |
 | rrg-server | 100.97.86.99 | andrea | Windmill, Postgres, Docker, DocuSeal |
 | larry-sms-gateway | 100.79.238.103 | larrygotcher | iMessage relay (no longer SMS gateway) |
 
 ## Key Ports
 - Windmill: 8000 (rrg-server)
 - DocuSeal: 3000 (rrg-server)
-- SMS Gateway: 8686 (pixel-9a, Termux Flask)
+- Commercial SMS Gateway: 8686 (pixel-9a, Termux Flask)
+- Residential SMS Gateway: 8080 (resource-realty---residential, SMSGate)
 
 ## SSH Access
 - **Tailscale SSH enabled on rrg-server** — use `ssh andrea@rrg-server` (no keys/passwords needed)
