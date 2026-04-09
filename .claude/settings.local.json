@@ -546,7 +546,9 @@
       "Bash(adb shell ip addr show tailscale0 2>/dev/null | grep \"inet \")",
       "Bash(adb shell ifconfig tailscale0 2>/dev/null || adb shell cat /proc/net/if_inet6 2>/dev/null | grep tailscale || echo \"no tailscale interface found\")",
       "Bash(mkdir -p /tmp/termux-apks && cd /tmp/termux-apks && curl -L -o termux.apk \"https://f-droid.org/repo/com.termux_1000.apk\" -w \"\\\\nHTTP %{http_code}, size: %{size_download}\\\\n\" 2>&1 | tail -5)",
-      "Bash(adb install /tmp/termux-apks/termux.apk 2>&1)"
+      "Bash(adb install /tmp/termux-apks/termux.apk 2>&1)",
+      "Bash(adb install /tmp/termux-apks/termux-api.apk 2>&1)",
+      "Bash(adb install /tmp/termux-apks/termux-boot.apk 2>&1)"
     ]
   },
   "enableAllProjectMcpServers": true,
