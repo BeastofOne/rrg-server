@@ -1223,12 +1223,12 @@ def main(message: dict = None):
             # --- INBOX path: categorize, label, parse leads, detect replies ---
             elif 'INBOX' in labels:
                 try:
-                    # Fetch sender + subject (metadata only, fast)
+                    # Fetch sender + subject + recipients (metadata only, fast)
                     msg = service.users().messages().get(
                         userId='me',
                         id=msg_id,
                         format='metadata',
-                        metadataHeaders=['From', 'Subject']
+                        metadataHeaders=['From', 'Subject', 'To', 'Cc']
                     ).execute()
 
                     hdrs = {h['name'].lower(): h['value']
@@ -1237,9 +1237,15 @@ def main(message: dict = None):
                     subject = hdrs.get('subject', '')
 
                     # Skip BCC copies of our own outbound emails (leads@ receives
-                    # BCC copies from teamgotcher@ drafts — not new leads)
+                    # BCC copies from teamgotcher@ drafts — not new leads).
+                    # BUT: Social Connect leads are FROM teamgotcher@ TO leads@,
+                    # so we must check if leads@ is in To/Cc. If it is, it's a
+                    # direct send (legitimate lead notification) — process it.
+                    # If leads@ is NOT in To/Cc, it's a BCC copy — skip it.
                     if source_account == 'leads' and 'teamgotcher@gmail.com' in sender.lower():
-                        continue
+                        to_cc = (hdrs.get('to', '') + ' ' + hdrs.get('cc', '')).lower()
+                        if 'leads@resourcerealtygroupmi.com' not in to_cc:
+                            continue
 
                     # Categorize
                     category, label_name = categorize_email(sender, subject)
