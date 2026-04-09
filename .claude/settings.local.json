@@ -557,7 +557,10 @@
       "Bash(adb shell \"cat /sdcard/setup.sh\" 2>&1 | head -5)",
       "Bash(adb shell \"curl -s http://localhost:8686/health\" 2>&1)",
       "Bash(adb shell \"input text 'pkg%sinstall%spython%s-y' && input keyevent 66\" 2>&1)",
-      "Bash(adb shell \"am start -n com.termux/.app.TermuxActivity\" 2>&1)"
+      "Bash(adb shell \"am start -n com.termux/.app.TermuxActivity\" 2>&1)",
+      "Bash(adb shell pm list packages 2>&1 | grep -i tailscale)",
+      "Bash(adb shell ip addr show tailscale0 2>&1)",
+      "Bash(adb shell ip addr show tun0 2>&1)"
     ]
   },
   "enableAllProjectMcpServers": true,
