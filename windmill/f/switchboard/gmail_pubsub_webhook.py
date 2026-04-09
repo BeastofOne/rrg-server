@@ -798,6 +798,7 @@ def parse_realtor_com_lead(service, msg_id, sender, subject):
     """
     msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
     body = get_body_from_payload(msg.get('payload', {}))
+    body = body.replace('\r', '')  # normalize line endings (\r\r\n → \n)
 
     # First Name + Last Name
     first_name = ""
