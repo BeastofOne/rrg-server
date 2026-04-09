@@ -172,12 +172,16 @@ def main(resume_payload: dict, response_data: dict):
         today = datetime.now().strftime("%Y-%m-%d")
 
         # SMS first (so we know outcome for CRM note)
-        SMS_GATEWAY_URL = wmill.get_variable("f/switchboard/sms_gateway_url")
+        SMS_GATEWAY_COMMERCIAL = wmill.get_variable("f/switchboard/sms_gateway_url")
+        SMS_GATEWAY_RESIDENTIAL = wmill.get_variable("f/switchboard/sms_gateway_url_residential") or SMS_GATEWAY_COMMERCIAL
+        RESIDENTIAL_SOURCES = {"realtor_com", "seller_hub", "social_connect", "upnest"}
         sms_results = []
 
         for draft in drafts:
             sms_body = draft.get("sms_body")
             phone = draft.get("phone", "")
+            source_type = draft.get("source_type", "")
+            gateway_url = SMS_GATEWAY_RESIDENTIAL if source_type in RESIDENTIAL_SOURCES else SMS_GATEWAY_COMMERCIAL
 
             if not sms_body or not phone:
                 sms_results.append({"sms_sent": False, "reason": "no_phone_or_body"})
@@ -193,7 +197,7 @@ def main(resume_payload: dict, response_data: dict):
 
             try:
                 sms_resp = requests.post(
-                    SMS_GATEWAY_URL,
+                    gateway_url,
                     json={"phone": phone_e164, "message": sms_body},
                     timeout=30
                 )
@@ -205,6 +209,16 @@ def main(resume_payload: dict, response_data: dict):
                 })
             except Exception as e:
                 sms_results.append({"phone": phone_e164, "sms_sent": False, "error": str(e)})
+                # Alert Jake via commercial gateway (Pixel 9a) if residential gateway fails
+                if source_type in RESIDENTIAL_SOURCES:
+                    try:
+                        requests.post(
+                            SMS_GATEWAY_COMMERCIAL,
+                            json={"phone": "+17348960518", "message": f"Residential SMS gateway error: failed to send SMS to {phone_e164} for {draft.get('email', 'unknown')}. Error: {str(e)}"},
+                            timeout=10
+                        )
+                    except Exception:
+                        pass  # alert failure must not crash pipeline
 
         # CRM notes with accurate SMS outcome
         for i, draft in enumerate(drafts):

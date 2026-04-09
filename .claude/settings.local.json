@@ -534,7 +534,12 @@
       "Bash(git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch get_gmail_token.py' --prune-empty -- origin/main..HEAD 2>&1)",
       "Bash(git stash && FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch get_gmail_token.py' --prune-empty -- origin/main..HEAD 2>&1)",
       "Bash(MSG_IDS=\"'19d5b29e7744cc4f','19d55790d7b3651c','19d5574979a23f83','19d2e78c493b13b9','19d158ea5846d3da','19d039cdcc4e4e7b','19d03433ec4f2056','19cf85e5267531d0','19cf0f240d4f6f71','19cee7552d239b47','19cdd60f06a37f01','19cdd58f415bba49','19cd7e733acb8b91','19cafd69ac23ff2a','19caf5d820ceef8f','19ca20243e08730f','19ca0cee0e107cf6','19c9f86d37f6bbf8'\"\n\nssh andrea@rrg-server \"docker exec windmill-db-1 psql -U postgres -d windmill -c \\\\\"\nSELECT message_id, account, category, processed_at\nFROM public.processed_notifications\nWHERE message_id IN \\($MSG_IDS\\)\nORDER BY processed_at;\n\\\\\"\")",
-      "Bash(adb devices -l 2>&1)"
+      "Bash(adb devices -l 2>&1)",
+      "Bash(adb shell pm list packages 2>/dev/null | grep -i tailscale)",
+      "Bash(adb shell pm list packages 2>/dev/null | grep -iE \"termux|fdroid|f.droid\")",
+      "Bash(adb shell getprop ro.product.model 2>/dev/null)",
+      "Bash(adb shell settings get global install_non_market_apps 2>/dev/null; adb shell cmd package install-existing com.android.vending 2>/dev/null; adb shell pm list packages -3 2>/dev/null | head -20)",
+      "Bash(adb install /tmp/fdroid.apk 2>&1)"
     ]
   },
   "enableAllProjectMcpServers": true,
