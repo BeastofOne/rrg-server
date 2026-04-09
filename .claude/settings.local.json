@@ -548,7 +548,13 @@
       "Bash(mkdir -p /tmp/termux-apks && cd /tmp/termux-apks && curl -L -o termux.apk \"https://f-droid.org/repo/com.termux_1000.apk\" -w \"\\\\nHTTP %{http_code}, size: %{size_download}\\\\n\" 2>&1 | tail -5)",
       "Bash(adb install /tmp/termux-apks/termux.apk 2>&1)",
       "Bash(adb install /tmp/termux-apks/termux-api.apk 2>&1)",
-      "Bash(adb install /tmp/termux-apks/termux-boot.apk 2>&1)"
+      "Bash(adb install /tmp/termux-apks/termux-boot.apk 2>&1)",
+      "Bash(adb shell settings put global verifier_verify_adb_installs 0 2>&1 && adb install /tmp/termux-apks/termux-boot.apk 2>&1)",
+      "Bash(adb shell run-as com.termux ls /data/data/com.termux/files/home/ 2>&1)",
+      "Bash(adb push /tmp/termux-apks/gateway.py /sdcard/gateway.py 2>&1 && adb push /tmp/termux-apks/boot-start.sh /sdcard/boot-start.sh 2>&1)",
+      "Bash(adb shell input text 'pkg%supdate%s-y%s\\\\&\\\\&%spkg%sinstall%stermux-api%s-y' && adb shell input keyevent 66)",
+      "Bash(adb push /tmp/termux-apks/setup.sh /sdcard/setup.sh 2>&1)",
+      "Bash(adb shell \"cat /sdcard/setup.sh\" 2>&1 | head -5)"
     ]
   },
   "enableAllProjectMcpServers": true,
