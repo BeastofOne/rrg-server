@@ -566,7 +566,9 @@
       "Bash(adb shell pm list packages 2>&1)",
       "Bash(npm update -g @anthropic-ai/claude)",
       "Bash(claude --version)",
-      "Bash(npm update -g @anthropic-ai/claude-code)"
+      "Bash(npm update -g @anthropic-ai/claude-code)",
+      "Bash(dig +short rrg-server.tailc01f9b.ts.net)",
+      "Bash(dig AAAA +short rrg-server.tailc01f9b.ts.net)"
     ]
   },
   "enableAllProjectMcpServers": true,
