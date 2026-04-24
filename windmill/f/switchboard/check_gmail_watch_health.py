@@ -32,6 +32,11 @@ from datetime import datetime, timezone
 WM_API_BASE = os.environ.get('BASE_INTERNAL_URL', 'http://localhost:8000')
 STALENESS_HOURS = 48
 
+# Hardcoded so bootstrap failures (wmill.get_variable raises) still get signal.
+# Matches f/switchboard/sms_gateway_url — Pixel 9a gateway on Tailscale.
+FALLBACK_SMS_URL = "http://100.125.176.16:8686/send-sms"
+ALERT_PHONE = "+17348960518"
+
 # (script_name, account_key_in_webhook_result, schedule_path, human_label)
 WATCH_SCRIPTS = [
     ("setup_gmail_watch", "teamgotcher", "f/switchboard/schedule_gmail_watch_renewal", "teamgotcher@"),
@@ -49,14 +54,14 @@ def main():
         token = wmill.get_variable("f/switchboard/router_token")
         sms_url = wmill.get_variable("f/switchboard/sms_gateway_url")
     except Exception as e:
-        delivered = try_send_alert(sms_url, f"Gmail health check bootstrap failed: {str(e)[:100]}")
+        delivered = send_alert(sms_url, f"Gmail health check bootstrap failed: {str(e)[:100]}")
         return {"status": "error", "reason": "bootstrap_failed", "error": str(e), "alert_delivered": delivered}
 
     try:
         return run_checks(token, sms_url)
     except Exception as e:
         # Catch-all so any unexpected runtime error still surfaces via SMS.
-        delivered = try_send_alert(sms_url, f"Gmail health check errored: {str(e)[:120]}")
+        delivered = send_alert(sms_url, f"Gmail health check errored: {str(e)[:120]}")
         return {"status": "error", "error": str(e), "alert_delivered": delivered}
 
 
@@ -95,12 +100,13 @@ def run_checks(token, sms_url):
     if not issues:
         return {
             "status": "healthy",
+            "alert_delivered": None,
             "accounts": account_status,
         }
 
     # Something is wrong: queue self-heal + alert
     heal_results = attempt_self_heal(token)
-    delivered = try_send_alert(sms_url, format_alert(issues, heal_results))
+    delivered = send_alert(sms_url, format_alert(issues, heal_results))
 
     return {
         "status": "alert_sent" if delivered else "alert_failed",
@@ -109,16 +115,6 @@ def run_checks(token, sms_url):
         "accounts": account_status,
         "renewals": heal_results,
     }
-
-
-def try_send_alert(sms_url, message):
-    """Best-effort SMS. Falls back to the Pixel gateway's Tailscale URL if
-    sms_url couldn't be loaded from Windmill variables. Returns True if the
-    gateway accepted the request (HTTP 2xx), False otherwise. Never raises."""
-    if not sms_url:
-        # Hardcoded fallback so bootstrap failures still get signal.
-        sms_url = "http://100.125.176.16:8686/send-sms"
-    return send_alert(sms_url, message)
 
 
 def check_account_staleness(conn, account_key):
@@ -242,17 +238,40 @@ def format_alert(issues, heal_results):
 
 
 def send_alert(sms_url, message):
-    """Send SMS alert to Jake via pixel-9a gateway. Returns True on HTTP 2xx,
-    False on gateway error or network failure. Never raises."""
+    """Send SMS alert to Jake via pixel-9a gateway. Returns True only if the
+    gateway reports the SMS as actually sent (not just accepted by HTTP).
+    Falls back to FALLBACK_SMS_URL if sms_url is empty. Never raises.
+
+    Pixel 9a gateway contract (matches lead_intake post_approval script):
+    returns JSON {"success": bool, "error": str} on HTTP 200. A 200 with
+    {"success": false} means the SMS failed to send (bad number, carrier
+    rejection, etc.) — must be reported as NOT delivered.
+    """
+    if not sms_url:
+        sms_url = FALLBACK_SMS_URL
     try:
         resp = requests.post(
             sms_url,
-            json={"phone": "+17348960518", "message": f"[RRG Alert] {message}"},
+            json={"phone": ALERT_PHONE, "message": f"[RRG Alert] {message}"},
             timeout=30,
         )
-        if not resp.ok:
-            print(f"SMS gateway returned {resp.status_code}: {resp.text[:200]}")
-        return resp.ok
     except Exception as e:
-        print(f"Failed to send SMS alert: {e}")
+        print(f"SMS gateway request failed: {e}")
         return False
+
+    if not resp.ok:
+        print(f"SMS gateway returned HTTP {resp.status_code}: {resp.text[:200]}")
+        return False
+
+    try:
+        data = resp.json()
+    except Exception:
+        # Gateway returned 2xx but non-JSON — treat as delivered since we
+        # can't inspect the body. Logs the response for post-mortem.
+        print(f"SMS gateway returned non-JSON 2xx: {resp.text[:200]}")
+        return True
+
+    if not data.get("success", False):
+        print(f"SMS gateway reported failure: {data.get('error', 'unknown')}")
+        return False
+    return True

@@ -32,11 +32,23 @@ from f.switchboard.check_gmail_watch_health import (  # noqa: E402
     check_account_staleness,
     check_schedules_enabled,
     attempt_self_heal,
-    try_send_alert,
     send_alert,
     format_alert,
+    FALLBACK_SMS_URL,
+    ALERT_PHONE,
     WATCH_SCRIPTS,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_wmill_mock():
+    """Reset the module-level wmill mock between tests to prevent order
+    dependencies (e.g., TestBootstrapFailure overwriting get_variable)."""
+    original_get_variable = _wmill_mock.get_variable
+    original_get_resource = _wmill_mock.get_resource
+    yield
+    _wmill_mock.get_variable = MagicMock()
+    _wmill_mock.get_resource = MagicMock()
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +131,22 @@ def _renewal_success():
     return resp
 
 
-def _sms_response(ok=True):
+def _sms_response(ok=True, http_ok=True, status=200, non_json=False):
+    """Build a mock Pixel gateway response.
+
+    ok=True, http_ok=True → HTTP 200 + {"success": true}                  (delivered)
+    ok=False, http_ok=True → HTTP 200 + {"success": false, "error": ...}  (gateway rejected)
+    http_ok=False         → HTTP error (e.g., 502) — not delivered
+    non_json=True         → HTTP 200 but response body is not JSON        (delivered, logged)
+    """
     resp = MagicMock()
-    resp.ok = ok
-    resp.status_code = 200 if ok else 502
-    resp.text = "ok" if ok else "gateway down"
+    resp.ok = http_ok
+    resp.status_code = status if not http_ok else 200
+    resp.text = "gateway down" if not http_ok else ("plain-text OK" if non_json else "{}")
+    if non_json:
+        resp.json.side_effect = ValueError("not JSON")
+    else:
+        resp.json.return_value = {"success": ok, "error": "" if ok else "bad number"}
     return resp
 
 
@@ -411,6 +434,47 @@ class TestAttemptSelfHeal:
         assert all(not r["success"] for r in results)
         assert "oauth revoked" in results[0]["error"]
 
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_network_exception_captured(self, mock_requests):
+        mock_requests.post.side_effect = ConnectionError("DNS resolution failed")
+        results = attempt_self_heal(TOKEN)
+        assert all(not r["success"] for r in results)
+        assert "DNS resolution failed" in results[0]["error"]
+
+
+class TestStalenessCheckErrored:
+    """pg connection raises → append issue, still fires alert."""
+
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_pg_connect_failure_flagged_and_alerted(self, mock_requests, mock_psycopg2):
+        _setup_wmill_vars()
+        mock_requests.get.return_value = _schedule_response(enabled=True)
+        mock_psycopg2.connect.side_effect = ConnectionError("pg down")
+
+        def route_post(url, **kw):
+            if SMS_URL in url or FALLBACK_SMS_URL in url:
+                return _sms_response(ok=True)
+            return _renewal_success()
+        mock_requests.post.side_effect = route_post
+
+        result = main()
+
+        assert result["status"] == "alert_sent"
+        assert any("staleness check errored" in i for i in result["issues"])
+
+
+class TestScheduleProbeHttp500:
+    """HTTP 5xx is not 404 — should flag as "check failed", not "missing"."""
+
+    @patch("f.switchboard.check_gmail_watch_health.time.sleep", return_value=None)
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_500_retried_then_flagged_as_check_failed(self, mock_requests, _sleep):
+        mock_requests.get.return_value = _schedule_response(status=500)
+        problems = check_schedules_enabled(TOKEN)
+        assert len(problems) == 2
+        assert all("check failed" in p for p in problems)
+
 
 class TestFormatAlert:
     def test_includes_each_issue_and_queued_note(self):
@@ -435,36 +499,50 @@ class TestFormatAlert:
         assert "revoked" in msg
 
 
-class TestTrySendAlert:
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_hardcoded_fallback_when_sms_url_none(self, mock_requests):
-        mock_requests.post.return_value = _sms_response(ok=True)
-        delivered = try_send_alert(None, "test")
-        assert delivered is True
-        args, _ = mock_requests.post.call_args
-        assert "100.125.176.16:8686" in args[0]
-
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_returns_false_on_gateway_non_2xx(self, mock_requests):
-        mock_requests.post.return_value = _sms_response(ok=False)
-        assert try_send_alert(SMS_URL, "test") is False
-
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_returns_false_on_exception(self, mock_requests):
-        mock_requests.post.side_effect = ConnectionError("down")
-        assert try_send_alert(SMS_URL, "test") is False
-
-
 class TestSendAlert:
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_sends_payload_with_jake_number(self, mock_requests):
+    def test_sends_payload_with_alert_phone(self, mock_requests):
         mock_requests.post.return_value = _sms_response(ok=True)
         send_alert(SMS_URL, "hello")
         _, kwargs = mock_requests.post.call_args
-        assert kwargs["json"]["phone"] == "+17348960518"
+        assert kwargs["json"]["phone"] == ALERT_PHONE
         assert "[RRG Alert] hello" in kwargs["json"]["message"]
 
     @patch("f.switchboard.check_gmail_watch_health.requests")
     def test_returns_false_on_exception(self, mock_requests):
         mock_requests.post.side_effect = ConnectionError("Network down")
         assert send_alert(SMS_URL, "x") is False
+
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_returns_false_on_http_error(self, mock_requests):
+        mock_requests.post.return_value = _sms_response(http_ok=False, status=502)
+        assert send_alert(SMS_URL, "x") is False
+
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_returns_false_on_gateway_success_false(self, mock_requests):
+        """Regression guard for C1: HTTP 200 + {"success": false} must not
+        be reported as delivered. Pixel gateway returns this on bad number,
+        carrier rejection, etc."""
+        mock_requests.post.return_value = _sms_response(ok=False, http_ok=True)
+        assert send_alert(SMS_URL, "x") is False
+
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_returns_true_on_non_json_2xx(self, mock_requests):
+        """If gateway returns 2xx but body is not JSON, treat as delivered —
+        we can't prove failure, and dropping silently is worse."""
+        mock_requests.post.return_value = _sms_response(non_json=True)
+        assert send_alert(SMS_URL, "x") is True
+
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_empty_sms_url_uses_fallback(self, mock_requests):
+        mock_requests.post.return_value = _sms_response(ok=True)
+        send_alert(None, "test")
+        args, _ = mock_requests.post.call_args
+        assert args[0] == FALLBACK_SMS_URL
+
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_empty_string_sms_url_uses_fallback(self, mock_requests):
+        mock_requests.post.return_value = _sms_response(ok=True)
+        send_alert("", "test")
+        args, _ = mock_requests.post.call_args
+        assert args[0] == FALLBACK_SMS_URL
