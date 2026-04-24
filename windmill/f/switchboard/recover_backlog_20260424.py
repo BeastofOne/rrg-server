@@ -31,6 +31,7 @@ from f.switchboard.gmail_pubsub_webhook import (  # type: ignore
     validate_lead,
     stage_leads,
     schedule_delayed_processing,
+    apply_label,
     LEAD_CATEGORIES,
 )
 
@@ -104,7 +105,7 @@ def main(dry_run: bool = True):
         sender = headers.get("From", "")
         subject = headers.get("Subject", "")
         # categorize_email returns (category_key, gmail_label); "unlabeled" for non-leads
-        cat_key, _ = categorize_email(sender, subject)
+        cat_key, label_name = categorize_email(sender, subject)
         if cat_key not in LEAD_CATEGORIES:
             continue
         candidates.append({
@@ -113,6 +114,7 @@ def main(dry_run: bool = True):
             "subject": subject,
             "date": headers.get("Date", ""),
             "category": cat_key,
+            "label_name": label_name,
         })
 
     # Filter out already-staged
@@ -131,54 +133,72 @@ def main(dry_run: bool = True):
     for c in missed:
         result["by_category"][c["category"]] = result["by_category"].get(c["category"], 0) + 1
 
-    if dry_run:
-        result["missed"] = missed
-        return result
-
-    # WET RUN: parse + validate + stage + trigger via webhook's own functions
-    staged_summary = []
+    # Parse + validate each missed candidate. In dry-run this preview lets Jake
+    # see exactly how many will be staged vs skipped before any writes. Both
+    # parse_lead_from_notification and validate_lead are read-only.
+    processed = []
     emails_to_process = set()
     for c in missed:
+        outcome = {
+            "message_id": c["message_id"],
+            "category": c["category"],
+            "subject": c["subject"],
+            "from": c["from"],
+        }
         try:
             lead = parse_lead_from_notification(
                 service, c["message_id"], c["from"], c["subject"], c["category"],
             )
-            # parse_lead_from_notification returns a dict (or None for messages
-            # that don't yield extractable lead data — e.g. upnest_info).
+            # parse_lead_from_notification returns dict | None (never list).
+            # None on messages that don't yield extractable lead data (e.g. upnest_info).
             if not lead:
-                staged_summary.append({
-                    "message_id": c["message_id"],
-                    "category": c["category"],
-                    "skipped": "parser_returned_none",
-                })
-                continue
-            # Production webhook validates before staging — match that behavior
-            # so we don't stage junk production would have rejected.
-            is_valid, issues = validate_lead(lead)
-            if not is_valid:
-                staged_summary.append({
-                    "message_id": c["message_id"],
-                    "category": c["category"],
-                    "skipped": "validation_failed",
-                    "issues": issues,
-                })
-                continue
-            lead.setdefault("notification_message_id", c["message_id"])
-            ids = stage_leads([lead])
-            staged_summary.append({
-                "message_id": c["message_id"],
-                "category": c["category"],
-                "staged_ids": ids,
-            })
-            email = (lead.get("email") or "").strip().lower()
-            if email:
-                emails_to_process.add(email)
+                outcome["disposition"] = "would_skip_parser_none"
+            else:
+                is_valid, issues = validate_lead(lead)
+                if not is_valid:
+                    outcome["disposition"] = "would_skip_validation_failed"
+                    outcome["validation_issues"] = issues
+                else:
+                    outcome["disposition"] = "would_stage"
+                    outcome["lead_email"] = lead.get("email", "")
+                    outcome["lead_name"] = lead.get("name", "")
         except Exception as e:
-            staged_summary.append({
-                "message_id": c["message_id"],
-                "category": c["category"],
-                "error": str(e)[:200],
-            })
+            outcome["disposition"] = "would_error"
+            outcome["error"] = str(e)[:200]
+            lead = None
+
+        processed.append(outcome)
+
+        # Wet-run side effects — mirror production webhook's labeling +
+        # staging + delayed-processing logic byte-for-byte.
+        if not dry_run:
+            label_name = c["label_name"]
+            try:
+                if outcome["disposition"] == "would_stage":
+                    lead.setdefault("notification_message_id", c["message_id"])
+                    ids = stage_leads([lead])
+                    outcome["staged_ids"] = ids
+                    # Production: apply source label on success (remove Unlabeled)
+                    apply_label(service, c["message_id"], label_name, remove_labels=["Unlabeled"])
+                    email = (lead.get("email") or "").strip().lower()
+                    if email:
+                        emails_to_process.add(email)
+                elif outcome["disposition"] in ("would_skip_parser_none", "would_skip_validation_failed"):
+                    # Production: downgrade to Unlabeled + remove source label
+                    apply_label(service, c["message_id"], "Unlabeled", remove_labels=[label_name])
+            except Exception as e:
+                outcome["wet_run_error"] = str(e)[:200]
+
+    # Aggregate preview counts
+    disposition_counts = {}
+    for o in processed:
+        d = o["disposition"]
+        disposition_counts[d] = disposition_counts.get(d, 0) + 1
+    result["dispositions"] = disposition_counts
+
+    if dry_run:
+        result["preview"] = processed
+        return result
 
     # Trigger delayed processing once per unique email
     triggered = []
@@ -189,7 +209,7 @@ def main(dry_run: bool = True):
         except Exception as e:
             triggered.append({"email": email, "error": str(e)[:200]})
 
-    result["staged_summary"] = staged_summary
+    result["processed"] = processed
     result["triggered"] = triggered
     result["unique_emails"] = len(emails_to_process)
     return result
