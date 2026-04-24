@@ -1,11 +1,14 @@
-summary: Renew Gmail Watch for leads@ Pub/Sub notifications (every 6 days)
+summary: Renew Gmail Watch for leads@ Pub/Sub notifications (daily)
+description: Renews Gmail watch for leads@ daily at 9 AM (Google's recommended
+  cadence). Watch expires after ~7 days; daily renewal gives a 6-day buffer
+  against transient failures.
 args: {}
 cron_version: v2
 email: jacob@resourcerealtygroupmi.com
 enabled: true
 is_flow: false
 no_flow_overlap: false
-schedule: 0 0 9 */6 * *
+schedule: 0 0 9 * * *
 script_path: f/switchboard/setup_gmail_leads_watch
 timezone: America/Detroit
 ws_error_handler_muted: false
