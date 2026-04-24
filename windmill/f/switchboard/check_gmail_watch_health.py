@@ -40,9 +40,27 @@ WATCH_SCRIPTS = [
 
 
 def main():
-    token = wmill.get_variable("f/switchboard/router_token")
-    sms_url = wmill.get_variable("f/switchboard/sms_gateway_url")
+    # Fetch Windmill variables up front. If these fail, we still need to alert
+    # Jake — fall back to a hardcoded SMS URL so a token/variable issue doesn't
+    # silently swallow the health-check failure.
+    token = None
+    sms_url = None
+    try:
+        token = wmill.get_variable("f/switchboard/router_token")
+        sms_url = wmill.get_variable("f/switchboard/sms_gateway_url")
+    except Exception as e:
+        try_send_alert(sms_url, f"Gmail health check bootstrap failed: {str(e)[:100]}")
+        return {"status": "error", "reason": "bootstrap_failed", "error": str(e)}
 
+    try:
+        return run_checks(token, sms_url)
+    except Exception as e:
+        # Catch-all so any unexpected runtime error still surfaces via SMS.
+        try_send_alert(sms_url, f"Gmail health check errored: {str(e)[:120]}")
+        return {"status": "error", "error": str(e)}
+
+
+def run_checks(token, sms_url):
     issues = []
 
     # 1) Schedule existence + enabled check
@@ -59,7 +77,7 @@ def main():
         pg = wmill.get_resource("f/switchboard/pg")
         conn = psycopg2.connect(
             host=pg["host"], port=pg.get("port", 5432), dbname=pg["dbname"],
-            user=pg["user"], password=pg["password"], sslmode=pg.get("sslmode", "prefer"),
+            user=pg["user"], password=pg["password"], sslmode=pg.get("sslmode", "disable"),
         )
         try:
             for _, account_key, _, label in WATCH_SCRIPTS:
@@ -82,7 +100,7 @@ def main():
 
     # Something is wrong: queue self-heal + alert
     heal_results = attempt_self_heal(token)
-    send_alert(sms_url, format_alert(issues, heal_results))
+    try_send_alert(sms_url, format_alert(issues, heal_results))
 
     return {
         "status": "alert_sent",
@@ -90,6 +108,19 @@ def main():
         "accounts": account_status,
         "renewals": heal_results,
     }
+
+
+def try_send_alert(sms_url, message):
+    """Best-effort SMS — swallow any exception so alerting failures don't mask
+    the original problem. Falls back to the Pixel gateway's Tailscale URL if
+    sms_url couldn't be loaded from Windmill variables."""
+    if not sms_url:
+        # Hardcoded fallback so bootstrap failures still get signal.
+        sms_url = "http://100.125.176.16:8686/send-sms"
+    try:
+        send_alert(sms_url, message)
+    except Exception as e:
+        print(f"try_send_alert failed: {e}")
 
 
 def check_account_staleness(conn, account_key):
