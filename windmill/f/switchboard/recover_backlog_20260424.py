@@ -28,14 +28,17 @@ from google.oauth2.credentials import Credentials
 from f.switchboard.gmail_pubsub_webhook import (  # type: ignore
     categorize_email,
     parse_lead_from_notification,
+    validate_lead,
     stage_leads,
     schedule_delayed_processing,
     LEAD_CATEGORIES,
 )
 
 # Start window: last successful leads@ webhook was 2026-04-16 04:46 UTC.
-# 2026-04-16 00:00 UTC = 1776268800 (small lookback buffer; dedup below).
-AFTER_EPOCH = 1776268800
+# Use 2026-04-16 00:00 UTC (= 1776297600) for a small lookback buffer —
+# dedup via staged_leads.notification_message_id skips anything already
+# staged, so widening the window is safe but slightly wasteful on API calls.
+AFTER_EPOCH = 1776297600
 
 
 def _get_leads_service():
@@ -132,33 +135,44 @@ def main(dry_run: bool = True):
         result["missed"] = missed
         return result
 
-    # WET RUN: parse + stage + trigger via the webhook's own functions
+    # WET RUN: parse + validate + stage + trigger via webhook's own functions
     staged_summary = []
     emails_to_process = set()
     for c in missed:
         try:
-            leads = parse_lead_from_notification(
+            lead = parse_lead_from_notification(
                 service, c["message_id"], c["from"], c["subject"], c["category"],
             )
-            # parse_lead_from_notification may return a list or a single dict
-            if leads is None:
+            # parse_lead_from_notification returns a dict (or None for messages
+            # that don't yield extractable lead data — e.g. upnest_info).
+            if not lead:
+                staged_summary.append({
+                    "message_id": c["message_id"],
+                    "category": c["category"],
+                    "skipped": "parser_returned_none",
+                })
                 continue
-            if isinstance(leads, dict):
-                leads = [leads]
-            # Ensure the webhook's dedup key is set
-            for lead in leads:
-                lead.setdefault("notification_message_id", c["message_id"])
-            ids = stage_leads(leads)
+            # Production webhook validates before staging — match that behavior
+            # so we don't stage junk production would have rejected.
+            is_valid, issues = validate_lead(lead)
+            if not is_valid:
+                staged_summary.append({
+                    "message_id": c["message_id"],
+                    "category": c["category"],
+                    "skipped": "validation_failed",
+                    "issues": issues,
+                })
+                continue
+            lead.setdefault("notification_message_id", c["message_id"])
+            ids = stage_leads([lead])
             staged_summary.append({
                 "message_id": c["message_id"],
                 "category": c["category"],
                 "staged_ids": ids,
-                "lead_count": len(leads),
             })
-            for lead in leads:
-                email = (lead.get("email") or "").strip().lower()
-                if email:
-                    emails_to_process.add(email)
+            email = (lead.get("email") or "").strip().lower()
+            if email:
+                emails_to_process.add(email)
         except Exception as e:
             staged_summary.append({
                 "message_id": c["message_id"],
