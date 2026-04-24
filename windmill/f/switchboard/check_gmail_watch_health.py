@@ -49,15 +49,15 @@ def main():
         token = wmill.get_variable("f/switchboard/router_token")
         sms_url = wmill.get_variable("f/switchboard/sms_gateway_url")
     except Exception as e:
-        try_send_alert(sms_url, f"Gmail health check bootstrap failed: {str(e)[:100]}")
-        return {"status": "error", "reason": "bootstrap_failed", "error": str(e)}
+        delivered = try_send_alert(sms_url, f"Gmail health check bootstrap failed: {str(e)[:100]}")
+        return {"status": "error", "reason": "bootstrap_failed", "error": str(e), "alert_delivered": delivered}
 
     try:
         return run_checks(token, sms_url)
     except Exception as e:
         # Catch-all so any unexpected runtime error still surfaces via SMS.
-        try_send_alert(sms_url, f"Gmail health check errored: {str(e)[:120]}")
-        return {"status": "error", "error": str(e)}
+        delivered = try_send_alert(sms_url, f"Gmail health check errored: {str(e)[:120]}")
+        return {"status": "error", "error": str(e), "alert_delivered": delivered}
 
 
 def run_checks(token, sms_url):
@@ -100,10 +100,11 @@ def run_checks(token, sms_url):
 
     # Something is wrong: queue self-heal + alert
     heal_results = attempt_self_heal(token)
-    try_send_alert(sms_url, format_alert(issues, heal_results))
+    delivered = try_send_alert(sms_url, format_alert(issues, heal_results))
 
     return {
-        "status": "alert_sent",
+        "status": "alert_sent" if delivered else "alert_failed",
+        "alert_delivered": delivered,
         "issues": issues,
         "accounts": account_status,
         "renewals": heal_results,
@@ -111,16 +112,13 @@ def run_checks(token, sms_url):
 
 
 def try_send_alert(sms_url, message):
-    """Best-effort SMS — swallow any exception so alerting failures don't mask
-    the original problem. Falls back to the Pixel gateway's Tailscale URL if
-    sms_url couldn't be loaded from Windmill variables."""
+    """Best-effort SMS. Falls back to the Pixel gateway's Tailscale URL if
+    sms_url couldn't be loaded from Windmill variables. Returns True if the
+    gateway accepted the request (HTTP 2xx), False otherwise. Never raises."""
     if not sms_url:
         # Hardcoded fallback so bootstrap failures still get signal.
         sms_url = "http://100.125.176.16:8686/send-sms"
-    try:
-        send_alert(sms_url, message)
-    except Exception as e:
-        print(f"try_send_alert failed: {e}")
+    return send_alert(sms_url, message)
 
 
 def check_account_staleness(conn, account_key):
@@ -244,12 +242,17 @@ def format_alert(issues, heal_results):
 
 
 def send_alert(sms_url, message):
-    """Send SMS alert to Jake via pixel-9a gateway."""
+    """Send SMS alert to Jake via pixel-9a gateway. Returns True on HTTP 2xx,
+    False on gateway error or network failure. Never raises."""
     try:
-        requests.post(
+        resp = requests.post(
             sms_url,
             json={"phone": "+17348960518", "message": f"[RRG Alert] {message}"},
             timeout=30,
         )
+        if not resp.ok:
+            print(f"SMS gateway returned {resp.status_code}: {resp.text[:200]}")
+        return resp.ok
     except Exception as e:
         print(f"Failed to send SMS alert: {e}")
+        return False
