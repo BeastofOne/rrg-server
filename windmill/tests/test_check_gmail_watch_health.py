@@ -1,8 +1,11 @@
-"""Tests for check_gmail_watch_health (self-healing version).
+"""Tests for check_gmail_watch_health (per-account version).
 
-Mocks are unavoidable here: wmill SDK is only available inside Windmill's
-sandbox, and requests make real HTTP calls to Windmill API + SMS gateway.
-All other logic is tested with real code.
+Covers the post-Apr-24-2026 rewrite: per-account staleness via direct pg
+query, schedule existence probe with retry, top-level error envelope, and
+SMS delivery status tracking.
+
+Mocks are unavoidable: wmill SDK is only available inside Windmill's
+sandbox, psycopg2 requires a live DB, and requests make real HTTP calls.
 """
 
 import sys
@@ -15,15 +18,23 @@ import pytest
 # Create a fake wmill module so the script can be imported outside Windmill
 _wmill_mock = types.ModuleType("wmill")
 _wmill_mock.get_variable = MagicMock()
+_wmill_mock.get_resource = MagicMock()
 sys.modules["wmill"] = _wmill_mock
 
-# Now import the module under test
-from f.switchboard.check_gmail_watch_health import (
+# Create a fake psycopg2 module — we patch psycopg2.connect in individual tests
+_psycopg2_mock = types.ModuleType("psycopg2")
+_psycopg2_mock.connect = MagicMock()
+sys.modules["psycopg2"] = _psycopg2_mock
+
+from f.switchboard.check_gmail_watch_health import (  # noqa: E402
     main,
-    check_webhook_staleness,
+    run_checks,
+    check_account_staleness,
+    check_schedules_enabled,
     attempt_self_heal,
-    format_failure_alert,
+    try_send_alert,
     send_alert,
+    format_alert,
     WATCH_SCRIPTS,
 )
 
@@ -34,388 +45,426 @@ from f.switchboard.check_gmail_watch_health import (
 
 TOKEN = "test-token-123"
 SMS_URL = "http://100.125.176.16:8686/send-sms"
+PG_RESOURCE = {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "windmill",
+    "user": "postgres",
+    "password": "pw",
+    "sslmode": "disable",
+}
 
 
-def _setup_wmill_vars():
+def _setup_wmill_vars(vars_dict=None):
     """Configure wmill.get_variable to return expected values."""
-    def get_variable(name):
-        return {
-            "f/switchboard/router_token": TOKEN,
-            "f/switchboard/sms_gateway_url": SMS_URL,
-        }[name]
-    _wmill_mock.get_variable = MagicMock(side_effect=get_variable)
+    defaults = {
+        "f/switchboard/router_token": TOKEN,
+        "f/switchboard/sms_gateway_url": SMS_URL,
+    }
+    if vars_dict is not None:
+        defaults.update(vars_dict)
+    _wmill_mock.get_variable = MagicMock(side_effect=lambda name: defaults[name])
+    _wmill_mock.get_resource = MagicMock(return_value=PG_RESOURCE)
 
 
-def _recent_timestamp(hours_ago=2):
-    """Return an ISO timestamp N hours in the past."""
-    dt = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
-    return dt.isoformat()
+def _fake_conn(staleness_by_account):
+    """Build a fake psycopg2 connection whose cursor returns a row for each
+    account_key in staleness_by_account (maps account_key -> hours_ago or None).
+    """
+    def cursor_factory():
+        cur = MagicMock()
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
+        # The script calls cur.execute(sql, (account_key,)) then cur.fetchone()
+        # We track the last-executed account_key to decide the return row.
+        state = {"last_account": None}
+
+        def execute(sql, params):
+            state["last_account"] = params[0]
+        cur.execute = execute
+
+        def fetchone():
+            acct = state["last_account"]
+            hours = staleness_by_account.get(acct)
+            if hours is None:
+                return None
+            ts = datetime.now(timezone.utc) - timedelta(hours=hours)
+            return (ts,)
+        cur.fetchone = fetchone
+        return cur
+
+    conn = MagicMock()
+    conn.cursor = cursor_factory
+    conn.close = MagicMock()
+    return conn
 
 
-def _stale_timestamp(hours_ago=72):
-    """Return an ISO timestamp N hours in the past (stale)."""
-    dt = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
-    return dt.isoformat()
-
-
-def _mock_jobs_response(created_at, status_code=200):
-    """Create a mock response for the Windmill jobs list endpoint."""
+def _schedule_response(enabled=True, status=200, body=None):
     resp = MagicMock()
-    resp.status_code = status_code
-    if created_at is None:
-        resp.json.return_value = []
+    resp.status_code = status
+    if status == 404:
+        resp.raise_for_status = MagicMock()
+    elif status >= 400:
+        resp.raise_for_status = MagicMock(side_effect=Exception(f"HTTP {status}"))
     else:
-        resp.json.return_value = [{"created_at": created_at}]
-    resp.raise_for_status = MagicMock()
+        resp.raise_for_status = MagicMock()
+    resp.json.return_value = body if body is not None else {"enabled": enabled}
     return resp
 
 
-def _mock_renewal_response(success=True, error_msg="OAuth token revoked"):
-    """Create a mock response for a watch renewal script call."""
+def _renewal_success():
     resp = MagicMock()
-    if success:
-        resp.status_code = 200
-        resp.json.return_value = {"expiration": "12345"}
-    else:
-        resp.status_code = 500
-        resp.json.return_value = {"error": {"message": error_msg}}
-        resp.text = error_msg
+    resp.status_code = 200
+    resp.text = '"job-id-abc"'
+    return resp
+
+
+def _sms_response(ok=True):
+    resp = MagicMock()
+    resp.ok = ok
+    resp.status_code = 200 if ok else 502
+    resp.text = "ok" if ok else "gateway down"
     return resp
 
 
 # ---------------------------------------------------------------------------
-# 1. Healthy: webhook ran recently -> returns healthy, no alert
+# Happy path: both accounts fresh, both schedules enabled
 # ---------------------------------------------------------------------------
 
 class TestHealthy:
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_recent_webhook_returns_healthy(self, mock_requests):
-        """When webhook ran within 48h, return healthy status with no SMS."""
+    def test_healthy_returns_per_account_status(self, mock_requests, mock_psycopg2):
         _setup_wmill_vars()
-        ts = _recent_timestamp(hours_ago=5)
-        mock_requests.get.return_value = _mock_jobs_response(ts)
+        # Both schedules enabled
+        mock_requests.get.return_value = _schedule_response(enabled=True)
+        # Both accounts fresh (5 hours ago)
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": 5, "teamgotcher": 5})
 
         result = main()
 
         assert result["status"] == "healthy"
-        assert result["hours_since_last_run"] <= 6  # roughly 5h
-        assert result["last_run"] == ts
-        # No SMS should be sent
-        mock_requests.post.assert_not_called()
-
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_healthy_at_boundary(self, mock_requests):
-        """Just under 48h, still healthy (avoids float precision flakiness)."""
-        _setup_wmill_vars()
-        ts = _recent_timestamp(hours_ago=47)
-        mock_requests.get.return_value = _mock_jobs_response(ts)
-
-        result = main()
-
-        assert result["status"] == "healthy"
+        assert result["accounts"]["leads"]["label"] == "leads@"
+        assert result["accounts"]["teamgotcher"]["label"] == "teamgotcher@"
+        assert 4 < result["accounts"]["leads"]["hours_since"] < 6
+        # No SMS and no renewal submissions
         mock_requests.post.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# 2. Stale + self-heal succeeds: both renewals work -> self_healed, no alert
+# Per-account staleness: one account silent, other fresh
 # ---------------------------------------------------------------------------
 
-class TestStaleSelfHealSuccess:
+class TestPerAccountStaleness:
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_stale_both_renewals_succeed(self, mock_requests):
-        """When stale and both renewals succeed, return self_healed."""
+    def test_leads_stale_teamgotcher_fresh_triggers_alert(self, mock_requests, mock_psycopg2):
+        """The April 16 outage scenario — leads@ silent, teamgotcher@ busy.
+        Previously this reported healthy globally; now it must flag leads@."""
         _setup_wmill_vars()
-        ts = _stale_timestamp(hours_ago=72)
-
-        def route_requests(url, **kwargs):
-            if "jobs/list" in url:
-                return _mock_jobs_response(ts)
-            elif "setup_gmail_watch" in url:
-                return _mock_renewal_response(success=True)
-            elif "setup_gmail_leads_watch" in url:
-                return _mock_renewal_response(success=True)
-            return MagicMock()
-
-        mock_requests.get.return_value = _mock_jobs_response(ts)
-        mock_requests.post.side_effect = route_requests
-
-        result = main()
-
-        assert result["status"] == "self_healed"
-        assert result["hours_since_last_run"] >= 71
-        assert result["renewals"] is not None
-        assert all(r["success"] for r in result["renewals"])
-        # No SMS alert sent (post calls are only renewal calls, no SMS)
-        for c in mock_requests.post.call_args_list:
-            assert SMS_URL not in str(c)
-
-
-# ---------------------------------------------------------------------------
-# 3. Stale + self-heal fails: renewal fails -> sends alert with error details
-# ---------------------------------------------------------------------------
-
-class TestStaleSelfHealFails:
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_stale_both_renewals_fail(self, mock_requests):
-        """When stale and both renewals fail, send SMS alert."""
-        _setup_wmill_vars()
-        ts = _stale_timestamp(hours_ago=72)
-
-        call_count = {"post": 0}
-
-        def route_post(url, **kwargs):
-            call_count["post"] += 1
-            if "setup_gmail_watch" in url or "setup_gmail_leads_watch" in url:
-                return _mock_renewal_response(success=False, error_msg="OAuth token revoked")
-            # SMS gateway call -- just return ok
-            resp = MagicMock()
-            resp.status_code = 200
-            return resp
-
-        mock_requests.get.return_value = _mock_jobs_response(ts)
-        mock_requests.post.side_effect = route_post
+        mock_requests.get.return_value = _schedule_response(enabled=True)
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": 200, "teamgotcher": 0.1})
+        # POST mock — renewals + SMS all succeed
+        mock_requests.post.side_effect = lambda url, **kw: (
+            _sms_response(ok=True) if SMS_URL in url else _renewal_success()
+        )
 
         result = main()
 
         assert result["status"] == "alert_sent"
-        assert result["reason"] == "self_heal_failed"
-        assert not all(r["success"] for r in result["renewals"])
-        # Verify SMS was sent (at least one post call to SMS URL)
-        sms_calls = [
-            c for c in mock_requests.post.call_args_list
-            if SMS_URL in str(c)
-        ]
+        assert result["alert_delivered"] is True
+        assert any("leads@" in i and "stale" in i for i in result["issues"])
+        assert not any("teamgotcher@" in i and "stale" in i for i in result["issues"])
+        # Two renewals queued + one SMS call
+        sms_calls = [c for c in mock_requests.post.call_args_list if SMS_URL in str(c)]
         assert len(sms_calls) == 1
 
-
-# ---------------------------------------------------------------------------
-# 4. Stale + partial failure: one succeeds, one fails -> sends alert
-# ---------------------------------------------------------------------------
-
-class TestStalePartialFailure:
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_one_renewal_succeeds_one_fails(self, mock_requests):
-        """When stale and one renewal fails, send SMS alert."""
+    def test_no_jobs_for_an_account_is_flagged(self, mock_requests, mock_psycopg2):
         _setup_wmill_vars()
-        ts = _stale_timestamp(hours_ago=72)
-
-        def route_post(url, **kwargs):
-            if "setup_gmail_watch" in url and "leads" not in url:
-                return _mock_renewal_response(success=True)
-            if "setup_gmail_leads_watch" in url:
-                return _mock_renewal_response(success=False, error_msg="Token expired")
-            # SMS gateway
-            resp = MagicMock()
-            resp.status_code = 200
-            return resp
-
-        mock_requests.get.return_value = _mock_jobs_response(ts)
-        mock_requests.post.side_effect = route_post
+        mock_requests.get.return_value = _schedule_response(enabled=True)
+        # leads: no jobs found; teamgotcher: fresh
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": None, "teamgotcher": 0.5})
+        mock_requests.post.side_effect = lambda url, **kw: (
+            _sms_response(ok=True) if SMS_URL in url else _renewal_success()
+        )
 
         result = main()
 
         assert result["status"] == "alert_sent"
-        assert result["reason"] == "self_heal_failed"
-        # One succeeded, one failed
-        successes = [r for r in result["renewals"] if r["success"]]
-        failures = [r for r in result["renewals"] if not r["success"]]
-        assert len(successes) == 1
-        assert len(failures) == 1
-        assert "Token expired" in failures[0]["error"]
+        assert any("leads@" in i and "no prior webhook jobs" in i for i in result["issues"])
 
 
 # ---------------------------------------------------------------------------
-# 5. No jobs found + self-heal succeeds
+# Schedule existence probe
 # ---------------------------------------------------------------------------
 
-class TestNoJobsSelfHealSuccess:
+class TestScheduleProbe:
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_no_jobs_both_renewals_succeed(self, mock_requests):
-        """When no webhook jobs found but renewals succeed, return self_healed."""
+    def test_missing_schedule_flagged(self, mock_requests, mock_psycopg2):
+        """404 on a schedule probe appends it to issues and triggers alert."""
         _setup_wmill_vars()
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": 1, "teamgotcher": 1})
 
-        def route_post(url, **kwargs):
-            if "setup_gmail_watch" in url or "setup_gmail_leads_watch" in url:
-                return _mock_renewal_response(success=True)
-            resp = MagicMock()
-            resp.status_code = 200
-            return resp
+        def route_get(url, **kw):
+            if "schedule_gmail_leads_watch_renewal" in url:
+                return _schedule_response(status=404, body={})
+            return _schedule_response(enabled=True)
 
-        mock_requests.get.return_value = _mock_jobs_response(None)  # empty jobs
-        mock_requests.post.side_effect = route_post
-
-        result = main()
-
-        assert result["status"] == "self_healed"
-        assert result["reason"] == "no_jobs_found"
-        assert all(r["success"] for r in result["renewals"])
-
-
-# ---------------------------------------------------------------------------
-# 6. No jobs found + self-heal fails
-# ---------------------------------------------------------------------------
-
-class TestNoJobsSelfHealFails:
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_no_jobs_renewals_fail(self, mock_requests):
-        """When no webhook jobs and renewals fail, send SMS alert."""
-        _setup_wmill_vars()
-
-        def route_post(url, **kwargs):
-            if "setup_gmail_watch" in url or "setup_gmail_leads_watch" in url:
-                return _mock_renewal_response(success=False, error_msg="Refresh token revoked")
-            # SMS gateway
-            resp = MagicMock()
-            resp.status_code = 200
-            return resp
-
-        mock_requests.get.return_value = _mock_jobs_response(None)
-        mock_requests.post.side_effect = route_post
+        mock_requests.get.side_effect = route_get
+        mock_requests.post.side_effect = lambda url, **kw: (
+            _sms_response(ok=True) if SMS_URL in url else _renewal_success()
+        )
 
         result = main()
 
         assert result["status"] == "alert_sent"
-        assert result["reason"] == "no_jobs_found"
-        # SMS was sent
-        sms_calls = [
-            c for c in mock_requests.post.call_args_list
-            if SMS_URL in str(c)
-        ]
-        assert len(sms_calls) == 1
+        assert any("schedule" in i and "missing or disabled" in i for i in result["issues"])
 
-
-# ---------------------------------------------------------------------------
-# 7. Staleness check errors -> sends alert
-# ---------------------------------------------------------------------------
-
-class TestStalenessCheckError:
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_api_error_sends_alert(self, mock_requests):
-        """When Windmill API call fails, send SMS alert."""
+    def test_disabled_schedule_flagged(self, mock_requests, mock_psycopg2):
         _setup_wmill_vars()
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": 1, "teamgotcher": 1})
 
-        # GET raises an exception
-        mock_requests.get.side_effect = Exception("Connection refused")
+        def route_get(url, **kw):
+            if "schedule_gmail_leads_watch_renewal" in url:
+                return _schedule_response(enabled=False)
+            return _schedule_response(enabled=True)
 
-        # POST (SMS gateway) should succeed
-        def route_post(url, **kwargs):
-            resp = MagicMock()
-            resp.status_code = 200
-            return resp
+        mock_requests.get.side_effect = route_get
+        mock_requests.post.side_effect = lambda url, **kw: (
+            _sms_response(ok=True) if SMS_URL in url else _renewal_success()
+        )
 
-        mock_requests.post.side_effect = route_post
+        result = main()
+
+        assert result["status"] == "alert_sent"
+        assert any("missing or disabled" in i for i in result["issues"])
+
+
+# ---------------------------------------------------------------------------
+# Retry behavior in check_schedules_enabled
+# ---------------------------------------------------------------------------
+
+class TestScheduleProbeRetry:
+    @patch("f.switchboard.check_gmail_watch_health.time.sleep", return_value=None)
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_transient_error_retried_then_succeeds(self, mock_requests, _sleep):
+        """First call throws, second returns enabled=True. No issue appended."""
+        call_state = {"count": 0}
+
+        def flaky_get(url, **kw):
+            call_state["count"] += 1
+            if call_state["count"] == 1:
+                raise Exception("transient ECONNREFUSED")
+            return _schedule_response(enabled=True)
+
+        mock_requests.get.side_effect = flaky_get
+        problems = check_schedules_enabled(TOKEN)
+        assert problems == []
+        # Both schedules tried; first retries once (2 calls) + second succeeds (1 call) = 3 total
+        # But the loop iterates once per schedule, so first schedule: 2 calls (throw+success),
+        # second schedule: 1 call (success). Total 3.
+        assert call_state["count"] == 3
+
+    @patch("f.switchboard.check_gmail_watch_health.time.sleep", return_value=None)
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_persistent_error_flagged_after_retry(self, mock_requests, _sleep):
+        mock_requests.get.side_effect = Exception("persistent failure")
+        problems = check_schedules_enabled(TOKEN)
+        assert len(problems) == 2
+        assert all("check failed" in p for p in problems)
+
+    @patch("f.switchboard.check_gmail_watch_health.time.sleep", return_value=None)
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_throw_then_404_reports_as_missing_not_check_failed(self, mock_requests, _sleep):
+        """Regression guard: after a throw on attempt 0, a clean 404 on
+        attempt 1 should flag the schedule as missing, not as 'check failed'."""
+        state = {"idx": 0}
+
+        def responses(url, **kw):
+            state["idx"] += 1
+            # First call on first schedule throws; retry returns 404
+            if state["idx"] == 1:
+                raise Exception("blip")
+            if state["idx"] == 2:
+                return _schedule_response(status=404, body={})
+            return _schedule_response(enabled=True)
+
+        mock_requests.get.side_effect = responses
+        problems = check_schedules_enabled(TOKEN)
+        assert len(problems) == 1
+        assert "check failed" not in problems[0]
+
+
+# ---------------------------------------------------------------------------
+# Alert delivery status tracking
+# ---------------------------------------------------------------------------
+
+class TestAlertDeliveryStatus:
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_sms_gateway_ok_returns_alert_sent(self, mock_requests, mock_psycopg2):
+        _setup_wmill_vars()
+        mock_requests.get.return_value = _schedule_response(enabled=True)
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": 200, "teamgotcher": 0.5})
+        mock_requests.post.side_effect = lambda url, **kw: (
+            _sms_response(ok=True) if SMS_URL in url else _renewal_success()
+        )
+
+        result = main()
+        assert result["status"] == "alert_sent"
+        assert result["alert_delivered"] is True
+
+    @patch("f.switchboard.check_gmail_watch_health.psycopg2")
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_sms_gateway_down_returns_alert_failed(self, mock_requests, mock_psycopg2):
+        _setup_wmill_vars()
+        mock_requests.get.return_value = _schedule_response(enabled=True)
+        mock_psycopg2.connect.return_value = _fake_conn({"leads": 200, "teamgotcher": 0.5})
+        mock_requests.post.side_effect = lambda url, **kw: (
+            _sms_response(ok=False) if SMS_URL in url else _renewal_success()
+        )
+
+        result = main()
+        assert result["status"] == "alert_failed"
+        assert result["alert_delivered"] is False
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap failure — wmill.get_variable raises
+# ---------------------------------------------------------------------------
+
+class TestBootstrapFailure:
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_variable_fetch_failure_still_alerts(self, mock_requests):
+        _wmill_mock.get_variable = MagicMock(side_effect=Exception("variable missing"))
+        mock_requests.post.return_value = _sms_response(ok=True)
 
         result = main()
 
         assert result["status"] == "error"
-        assert "Connection refused" in result["error"]
-        # SMS was sent
-        sms_calls = [
-            c for c in mock_requests.post.call_args_list
-            if SMS_URL in str(c)
-        ]
-        assert len(sms_calls) == 1
+        assert result["reason"] == "bootstrap_failed"
+        assert result["alert_delivered"] is True
+        # Fallback SMS URL was used
+        assert any(
+            "100.125.176.16:8686" in str(c)
+            for c in mock_requests.post.call_args_list
+        )
 
 
 # ---------------------------------------------------------------------------
-# Unit tests for helper functions
+# Top-level error envelope — run_checks raises
 # ---------------------------------------------------------------------------
 
-class TestCheckWebhookStaleness:
+class TestTopLevelErrorEnvelope:
+    @patch("f.switchboard.check_gmail_watch_health.run_checks")
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_returns_none_when_no_jobs(self, mock_requests):
-        mock_requests.get.return_value = _mock_jobs_response(None)
-        hours, last_run = check_webhook_staleness("token")
+    def test_unexpected_error_caught_and_alerted(self, mock_requests, mock_run):
+        _setup_wmill_vars()
+        mock_run.side_effect = RuntimeError("boom")
+        mock_requests.post.return_value = _sms_response(ok=True)
+
+        result = main()
+
+        assert result["status"] == "error"
+        assert "boom" in result["error"]
+        assert result["alert_delivered"] is True
+
+
+# ---------------------------------------------------------------------------
+# Helper unit tests
+# ---------------------------------------------------------------------------
+
+class TestCheckAccountStaleness:
+    def test_returns_none_when_no_rows(self):
+        conn = _fake_conn({"leads": None})
+        hours, ts = check_account_staleness(conn, "leads")
         assert hours is None
-        assert last_run is None
+        assert ts is None
 
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_returns_hours_for_recent_job(self, mock_requests):
-        ts = _recent_timestamp(hours_ago=10)
-        mock_requests.get.return_value = _mock_jobs_response(ts)
-        hours, last_run = check_webhook_staleness("token")
-        assert 9 < hours < 11
-        assert last_run == ts
-
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_returns_none_when_created_at_empty_string(self, mock_requests):
-        """When created_at is an empty string, should return (None, None)."""
-        mock_requests.get.return_value = _mock_jobs_response("")
-        hours, last_run = check_webhook_staleness("token")
-        assert hours is None
-        assert last_run is None
-
-    @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_raises_on_api_error(self, mock_requests):
-        resp = MagicMock()
-        resp.raise_for_status.side_effect = Exception("401 Unauthorized")
-        mock_requests.get.return_value = resp
-        with pytest.raises(Exception, match="401 Unauthorized"):
-            check_webhook_staleness("token")
+    def test_returns_hours_for_recent_row(self):
+        conn = _fake_conn({"leads": 3})
+        hours, ts = check_account_staleness(conn, "leads")
+        assert 2 < hours < 4
+        assert ts is not None
 
 
 class TestAttemptSelfHeal:
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_both_succeed(self, mock_requests):
-        mock_requests.post.return_value = _mock_renewal_response(success=True)
-        results = attempt_self_heal("token")
+    def test_both_queued(self, mock_requests):
+        mock_requests.post.return_value = _renewal_success()
+        results = attempt_self_heal(TOKEN)
         assert len(results) == 2
         assert all(r["success"] for r in results)
 
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_captures_http_error(self, mock_requests):
-        mock_requests.post.return_value = _mock_renewal_response(
-            success=False, error_msg="Token revoked"
-        )
-        results = attempt_self_heal("token")
-        assert len(results) == 2
-        assert not any(r["success"] for r in results)
-        assert "Token revoked" in results[0]["error"]
+    def test_failure_captured(self, mock_requests):
+        bad = MagicMock()
+        bad.status_code = 500
+        bad.text = "oauth revoked"
+        mock_requests.post.return_value = bad
+        results = attempt_self_heal(TOKEN)
+        assert all(not r["success"] for r in results)
+        assert "oauth revoked" in results[0]["error"]
+
+
+class TestFormatAlert:
+    def test_includes_each_issue_and_queued_note(self):
+        issues = ["leads@ webhook stale (200h)", "schedule X missing or disabled"]
+        heal = [
+            {"script": "setup_gmail_watch", "account": "teamgotcher@", "success": True, "note": "queued"},
+            {"script": "setup_gmail_leads_watch", "account": "leads@", "success": True, "note": "queued"},
+        ]
+        msg = format_alert(issues, heal)
+        assert "leads@ webhook stale" in msg
+        assert "missing or disabled" in msg
+        assert "Auto-renewal queued" in msg
+
+    def test_flags_self_heal_failures(self):
+        issues = ["leads@ webhook stale (200h)"]
+        heal = [
+            {"script": "setup_gmail_watch", "account": "teamgotcher@", "success": False, "error": "revoked"},
+            {"script": "setup_gmail_leads_watch", "account": "leads@", "success": False, "error": "revoked"},
+        ]
+        msg = format_alert(issues, heal)
+        assert "Self-heal FAILED" in msg
+        assert "revoked" in msg
+
+
+class TestTrySendAlert:
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_hardcoded_fallback_when_sms_url_none(self, mock_requests):
+        mock_requests.post.return_value = _sms_response(ok=True)
+        delivered = try_send_alert(None, "test")
+        assert delivered is True
+        args, _ = mock_requests.post.call_args
+        assert "100.125.176.16:8686" in args[0]
 
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_captures_network_exception(self, mock_requests):
-        mock_requests.post.side_effect = ConnectionError("DNS resolution failed")
-        results = attempt_self_heal("token")
-        assert len(results) == 2
-        assert not any(r["success"] for r in results)
-        assert "DNS resolution failed" in results[0]["error"]
+    def test_returns_false_on_gateway_non_2xx(self, mock_requests):
+        mock_requests.post.return_value = _sms_response(ok=False)
+        assert try_send_alert(SMS_URL, "test") is False
 
-
-class TestFormatFailureAlert:
-    def test_with_hours_since(self):
-        results = [
-            {"script": "setup_gmail_watch", "account": "teamgotcher@", "success": True},
-            {"script": "setup_gmail_leads_watch", "account": "leads@", "success": False, "error": "Token revoked"},
-        ]
-        msg = format_failure_alert(results, hours_since=72)
-        assert "72h" in msg
-        assert "teamgotcher@" in msg
-        assert "OK" in msg
-        assert "FAILED" in msg
-        assert "Token revoked" in msg
-
-    def test_with_reason(self):
-        results = [
-            {"script": "setup_gmail_watch", "account": "teamgotcher@", "success": False, "error": "err"},
-            {"script": "setup_gmail_leads_watch", "account": "leads@", "success": False, "error": "err"},
-        ]
-        msg = format_failure_alert(results, reason="no prior webhook jobs")
-        assert "no prior webhook jobs" in msg
-        assert "Self-heal failed" in msg
+    @patch("f.switchboard.check_gmail_watch_health.requests")
+    def test_returns_false_on_exception(self, mock_requests):
+        mock_requests.post.side_effect = ConnectionError("down")
+        assert try_send_alert(SMS_URL, "test") is False
 
 
 class TestSendAlert:
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_sends_sms_with_correct_payload(self, mock_requests):
-        send_alert(SMS_URL, "Test message")
-        mock_requests.post.assert_called_once_with(
-            SMS_URL,
-            json={"phone": "+17348960518", "message": "[RRG Alert] Test message"},
-            timeout=30,
-        )
+    def test_sends_payload_with_jake_number(self, mock_requests):
+        mock_requests.post.return_value = _sms_response(ok=True)
+        send_alert(SMS_URL, "hello")
+        _, kwargs = mock_requests.post.call_args
+        assert kwargs["json"]["phone"] == "+17348960518"
+        assert "[RRG Alert] hello" in kwargs["json"]["message"]
 
     @patch("f.switchboard.check_gmail_watch_health.requests")
-    def test_swallows_exceptions(self, mock_requests):
+    def test_returns_false_on_exception(self, mock_requests):
         mock_requests.post.side_effect = ConnectionError("Network down")
-        # Should not raise
-        send_alert(SMS_URL, "Test message")
+        assert send_alert(SMS_URL, "x") is False
