@@ -178,11 +178,15 @@ def main(dry_run: bool = True):
                     lead.setdefault("notification_message_id", c["message_id"])
                     ids = stage_leads([lead])
                     outcome["staged_ids"] = ids
-                    # Production: apply source label on success (remove Unlabeled)
-                    apply_label(service, c["message_id"], label_name, remove_labels=["Unlabeled"])
+                    # Record the email for downstream scheduling BEFORE
+                    # applying the Gmail label. If apply_label throws, the
+                    # staged lead would otherwise sit in the DB without
+                    # schedule_delayed_processing being called for its email.
                     email = (lead.get("email") or "").strip().lower()
                     if email:
                         emails_to_process.add(email)
+                    # Production: apply source label on success (remove Unlabeled)
+                    apply_label(service, c["message_id"], label_name, remove_labels=["Unlabeled"])
                 elif outcome["disposition"] in ("would_skip_parser_none", "would_skip_validation_failed"):
                     # Production: downgrade to Unlabeled + remove source label
                     apply_label(service, c["message_id"], "Unlabeled", remove_labels=[label_name])
