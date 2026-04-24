@@ -42,10 +42,9 @@ from f.switchboard.check_gmail_watch_health import (  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def reset_wmill_mock():
-    """Reset the module-level wmill mock between tests to prevent order
-    dependencies (e.g., TestBootstrapFailure overwriting get_variable)."""
-    original_get_variable = _wmill_mock.get_variable
-    original_get_resource = _wmill_mock.get_resource
+    """Reset the module-level wmill mock AFTER each test so one test's
+    side_effect can't leak into the next (e.g., TestBootstrapFailure sets
+    get_variable to raise)."""
     yield
     _wmill_mock.get_variable = MagicMock()
     _wmill_mock.get_resource = MagicMock()
@@ -167,6 +166,8 @@ class TestHealthy:
         result = main()
 
         assert result["status"] == "healthy"
+        # alert_delivered is None on healthy (API symmetry — present in every return)
+        assert result["alert_delivered"] is None
         assert result["accounts"]["leads"]["label"] == "leads@"
         assert result["accounts"]["teamgotcher"]["label"] == "teamgotcher@"
         assert 4 < result["accounts"]["leads"]["hours_since"] < 6
