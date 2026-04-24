@@ -23,6 +23,7 @@
 #requests
 
 import os
+import time
 import wmill
 import requests
 import psycopg2
@@ -57,7 +58,7 @@ def main():
     try:
         pg = wmill.get_resource("f/switchboard/pg")
         conn = psycopg2.connect(
-            host=pg["host"], port=pg["port"], dbname=pg["dbname"],
+            host=pg["host"], port=pg.get("port", 5432), dbname=pg["dbname"],
             user=pg["user"], password=pg["password"], sslmode=pg.get("sslmode", "prefer"),
         )
         try:
@@ -118,24 +119,37 @@ def check_account_staleness(conn, account_key):
 
 
 def check_schedules_enabled(token):
-    """Return a list of schedule paths that are missing or disabled."""
+    """Return a list of schedule paths that are missing or disabled.
+
+    Retries transient errors once (1s backoff) so a blip on localhost:8000
+    doesn't produce a false-positive SMS on the daily run.
+    """
     problems = []
     for _, _, schedule_path, _ in WATCH_SCRIPTS:
-        try:
-            resp = requests.get(
-                f"{WM_API_BASE}/api/w/rrg/schedules/get/{schedule_path}",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=15,
-            )
-            if resp.status_code == 404:
-                problems.append(schedule_path)
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-            if not data.get("enabled", False):
-                problems.append(schedule_path)
-        except Exception as e:
-            problems.append(f"{schedule_path} (check failed: {str(e)[:80]})")
+        last_err = None
+        for attempt in range(2):
+            try:
+                resp = requests.get(
+                    f"{WM_API_BASE}/api/w/rrg/schedules/get/{schedule_path}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=15,
+                )
+                if resp.status_code == 404:
+                    problems.append(schedule_path)
+                    last_err = None
+                    break
+                resp.raise_for_status()
+                data = resp.json()
+                if not data.get("enabled", False):
+                    problems.append(schedule_path)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    time.sleep(1)
+        if last_err is not None:
+            problems.append(f"{schedule_path} (check failed: {str(last_err)[:80]})")
     return problems
 
 
