@@ -1,103 +1,123 @@
 # NDA Signing — Chrome Local Network Access Fix
 
-**Date:** 2026-05-18
+**Date:** 2026-05-18 (revised after research)
 **Author:** Jake (with Claude)
-**Status:** Design approved, ready for implementation plan
+**Status:** Design approved in principle, on hold until Alexa is in office
 
 ## Problem
 
-The NDA signing form at `https://resourcerealtygroupmi.com/forms/sign-nda/` embeds DocuSeal as an iframe pointing at `https://rrg-server.tailc01f9b.ts.net/d/vjL9piBoG3jToA`. Larry reported that documents weren't getting signed and the front page wasn't auto-filling.
+NDA signing form at `https://resourcerealtygroupmi.com/forms/sign-nda/` embeds DocuSeal as an iframe pointing at `https://rrg-server.tailc01f9b.ts.net/d/vjL9piBoG3jToA`. Larry reported documents weren't being signed and the front page wasn't auto-filling.
 
-Investigation showed:
-- Last successful submission was May 10 (Nic Bucca). Zero submissions started between May 10 and May 18 — visitors weren't even reaching DocuSeal.
-- The DocuSeal container and WordPress page hadn't changed since February.
-- Chrome shows a **Local Network Access (LNA) permission prompt** ("resourcerealtygroupmi.com wants to access other devices on your local network") when the iframe loads. The prompt is triggered because `rrg-server.tailc01f9b.ts.net` resolves to a Tailscale `100.x.x.x` CGNAT IP, which Chrome treats as a local-network target embedded by a public origin.
-- When a visitor clicks **Block** (the natural reaction to an unexpected scary popup), DocuSeal's subresource requests inside the iframe get blocked. The form appears broken: no auto-fill, no signing, no submission record.
-- Safari and Firefox don't trigger LNA and work fine. The issue is Chrome-specific.
-- The "worked for months, broke a week ago" pattern matches Chrome's wider rollout of LNA prompts in early-to-mid 2026.
+Investigation:
+- Last successful submission: Nic Bucca, May 10. Zero submissions started between May 10 and May 18.
+- DocuSeal container and WordPress page unchanged since February.
+- **Chrome's Local Network Access (LNA) permission prompt** fires when the iframe loads. Triggered because `rrg-server.tailc01f9b.ts.net` resolves to a Tailscale `100.x.x.x` CGNAT IP, which Chrome treats as "local network" when embedded by a public origin.
+- Visitors clicking **Block** on the prompt blocks DocuSeal subresource requests → form silently fails.
+- Safari and Firefox don't trigger LNA. Issue is Chrome-specific.
+- "Worked for months, broke a week ago" matches Chrome's wider LNA rollout in early-to-mid 2026.
+
+The genuine fix per Chromium documentation: "ensure that tunnelled resources aren't resolved to CGNAT addresses from the browser's perspective, by configuring split tunnelling or DNS resolution so that browser-initiated requests go through a reverse proxy with a public address."
 
 ## Goal
 
-Visitors using any major browser can sign the NDA on the website without seeing scary permission prompts, while keeping the embedded UX (form feels like part of the website, not a redirect).
+Visitors using any major browser can sign the NDA on the website without seeing scary permission prompts, while keeping the embedded UX. No changes to existing DNS for `resourcerealtygroupmi.com` that would risk WordPress or Google Workspace email.
 
 ## Non-goals
 
 - Moving DocuSeal off rrg-server (data stays put, container stays put).
-- Fixing other Tailscale-Funneled services (Windmill, Streamlit) — they're admin-only and accessed directly, not embedded.
-- Changes inside the DocuSeal Rails fork (no rebuild required).
+- Fixing other Tailscale-Funneled services (Windmill, Streamlit) — admin-only, accessed directly, not embedded.
+- Changes inside the DocuSeal Rails fork.
+
+## DNS scope (locked)
+
+Jake's constraint (May 18, 2026): no changes to existing DNS at startlogic. Apex `resourcerealtygroupmi.com`, `www`, Google Workspace MX records, SPF, DKIM, and google-site-verification TXTs all remain at startlogic, untouched. The only allowed change at startlogic is **adding** new records for the new `sign.` subdomain — never editing or removing existing records.
+
+This constraint rules out full DNS migration to Cloudflare.
 
 ## Architecture
 
-Expose DocuSeal at a new public-IP-fronted hostname `sign.resourcerealtygroupmi.com` via Cloudflare Tunnel. From the browser's perspective the iframe target resolves to Cloudflare's public anycast IPs, so Chrome no longer treats it as local-network and skips the LNA prompt.
+Small VPS as a public-IP reverse proxy in front of DocuSeal. VPS is joined to the Tailscale network so it can reach `rrg-server:3000` over the encrypted overlay; visitors reach the VPS over the public internet.
 
 ```
 Visitor browser
   │
   ├── (top page) ──► startlogic shared host ── WordPress
   │
-  └── (iframe)   ──► Cloudflare edge (public IP)
-                      └── cloudflared tunnel ──► rrg-server:3000 (DocuSeal)
+  └── (iframe to sign.resourcerealtygroupmi.com)
+                │
+                ▼
+       VPS public IP  (Hetzner CX11, €4/mo)
+                │  Caddy with auto-TLS via Let's Encrypt
+                │  Tailscale node
+                ▼
+       rrg-server:3000 (DocuSeal, unchanged)
 ```
 
-DocuSeal still listens on `rrg-server:3000` exactly as today. The cloudflared container runs alongside the docuseal container on rrg-server and establishes an outbound tunnel to Cloudflare — no inbound ports opened at the home router.
+DocuSeal still listens on `rrg-server:3000` exactly as today. No inbound ports opened at the home router. No data migration.
 
-## Why Cloudflare Tunnel
+## Why VPS reverse proxy (vs. alternatives)
 
 Considered and ruled out:
 
-- **Tailscale Funnel CNAME** — doesn't help. CNAMEs resolve to the same Tailscale IP, browser still sees a private IP, LNA prompt persists.
-- **VPS reverse proxy** — works but adds ~$60/yr and an extra moving part. Not necessary when Cloudflare Tunnel is free.
-- **Port-forward + Let's Encrypt at home router** — exposes home IP, requires dynamic DNS, raises home-network attack surface, ISP may block port 443.
-- **`window.open` instead of iframe** — bypasses LNA but loses the embedded UX, which is a stated requirement.
-- **Managed DocuSeal host (Fly/Render)** — would require data migration and ongoing cost. Out of scope.
+- **Cloudflare Tunnel + full DNS migration to Cloudflare.** Free, but explicitly rejected by Jake — touches Google Workspace email DNS, accepts non-zero risk to a critical system for a non-critical fix.
+- **Cloudflare Tunnel + subdomain-only zone delegation.** Per Cloudflare's own docs (May 2026): "Subdomain setup is only available for Enterprise accounts." Not viable on free plan.
+- **Cloudflare Tunnel + partial setup (CNAME setup).** Per Cloudflare's docs: Business plan or higher only (~$200/mo). Not viable.
+- **Cloudflare Quick Tunnel** (free, random `trycloudflare.com` URL). URL rotates on every restart. Useless for production embed. Only useful for one-shot theory verification.
+- **Tailscale Funnel CNAME workaround.** Doesn't help — CNAMEs resolve to the same Tailscale IP, browser still sees private IP, LNA prompt persists.
+- **Port-forward + Let's Encrypt at home router.** Exposes home IP, requires DDNS for IP changes, raises home-network attack surface, ISP may block port 443. Not gold-standard.
+- **`window.open` instead of iframe.** Bypasses LNA but loses the embedded UX. Stated requirement violated.
+- **Move DocuSeal to a managed host** (Fly.io, Render). Requires data migration and adds an independent maintenance surface separate from rrg-server. Not justified by current need; possible future direction.
+- **Oracle Cloud Always Free ARM VPS.** Genuinely free, generous specs, but account approval is unreliable and Oracle reclaims idle accounts. Acceptable cost-saving alternative but not the gold-standard recommendation.
 
-Cloudflare Tunnel is free, requires no inbound ports, no data migration, and DocuSeal stays exactly where it is.
+A small Hetzner VPS (€4–5/mo) gives a permanent public IP without touching any existing DNS apart from one new A record. The same VPS can later become the gateway for other home-hosted services (Windmill admin UI, Streamlit dashboards) without repeating this dance per service.
 
-## DNS scope (locked)
+## Bonus quality improvement (independent of LNA fix)
 
-Apex `resourcerealtygroupmi.com` and all existing records (WordPress A records, Google Workspace MX, SPF, DKIM, google-site-verification TXTs) stay at startlogic, untouched. Only the new `sign.resourcerealtygroupmi.com` subdomain is delegated to Cloudflare. Email and WordPress cannot be affected because their records remain entirely under startlogic's control.
+The WordPress page currently embeds DocuSeal with a hand-rolled `<iframe>` and ad-hoc postMessage handlers. Replace with DocuSeal's official `<docuseal-form>` custom element (loaded from `https://cdn.docuseal.com/js/form.js`). Gives proper event hooks (`init`, `load`, `completed`, `declined`), prefill via `data-values`, optional read-only fields, and built-in completion redirect. Future-proof and matches DocuSeal's documented embed pattern.
 
 ## Changes
 
-1. **Cloudflare account setup.** Create a free Cloudflare account, add `sign.resourcerealtygroupmi.com` as its own zone (subdomain zone, not full apex). Cloudflare assigns two nameservers. **Verify before this step: Cloudflare free plan still supports subdomain zones.** If not, fallback to small VPS approach (A record for `sign.` at startlogic → VPS public IP → reverse proxy to rrg-server).
-2. **NS delegation at startlogic.** Add NS records at startlogic: `sign.resourcerealtygroupmi.com NS <cloudflare-ns-1>` and `... NS <cloudflare-ns-2>`. The startlogic apex zone and all existing records remain in place; only the new subdomain is delegated. No risk to existing email or website.
-3. **cloudflared container on rrg-server.** Add a `cloudflared` service to `deploy/docker-compose.yml` (or a new `deploy/cloudflared-docker-compose.yml`) running `cloudflared tunnel run` with a named tunnel. Tunnel configuration routes hostname `sign.resourcerealtygroupmi.com` to `http://docuseal:3000`.
-4. **Cloudflare DNS record for the tunnel.** Create a CNAME `sign` → `<tunnel-id>.cfargotunnel.com` (proxied/orange-cloud), wired to the named tunnel.
-5. **DocuSeal `HOST` env update.** Edit `deploy/docker-compose.yml` (or wherever the docuseal service is defined) to set `HOST=sign.resourcerealtygroupmi.com`. Restart the docuseal container.
-6. **WordPress page 72073 update.** Edit the inline `<script>` on `/forms/sign-nda/` so `docusealUrl` builds from `https://sign.resourcerealtygroupmi.com/d/vjL9piBoG3jToA?...` instead of `https://rrg-server.tailc01f9b.ts.net/d/...`. Single line change. Use the WordPress MCP `wordpress_update_page` tool.
+1. **Provision VPS.** Hetzner CX11 in Ashburn (or closest US region) running Debian 12. Note the assigned IPv4 address.
+2. **Join VPS to Tailscale.** Install Tailscale on the VPS, authenticate, name it `rrg-edge` (or similar). Confirm it can reach `rrg-server:3000`.
+3. **Install and configure Caddy on VPS.** Single-site Caddyfile reverse-proxying `sign.resourcerealtygroupmi.com` to `http://rrg-server:3000`. Caddy auto-provisions a Let's Encrypt cert once DNS resolves.
+4. **Add A record at startlogic.** `sign.resourcerealtygroupmi.com → <VPS public IPv4>`. This is the only DNS change at startlogic. Apex/www/MX/SPF/DKIM untouched.
+5. **Wait for DNS propagation + verify TLS.** `curl https://sign.resourcerealtygroupmi.com` should return the DocuSeal home page with a valid cert.
+6. **Update DocuSeal `HOST` env** in `deploy/docker-compose.yml` from `rrg-server.tailc01f9b.ts.net` to `sign.resourcerealtygroupmi.com`. Restart docuseal container.
+7. **Update WordPress page 72073.** Replace the hand-rolled iframe block with the DocuSeal `<docuseal-form>` embed, pointing at `https://sign.resourcerealtygroupmi.com/d/vjL9piBoG3jToA`. Use the WordPress MCP `wordpress_update_page` tool.
+8. **Verify end-to-end** in Chrome incognito on a non-Tailscale network (cellular hotspot to ensure no Tailscale shortcut).
 
 ## Rollback
 
-Every step is independently reversible:
+Every step independently reversible:
 
 | Step | Rollback |
 |------|----------|
 | WordPress page change | Restore from page revision history (28 revisions saved) |
-| DocuSeal HOST env | Revert env value and `docker compose up -d` |
-| cloudflared container | `docker compose stop cloudflared` and remove from compose file |
-| Cloudflare DNS record | Delete CNAME in dashboard |
-| NS delegation at startlogic | Delete the `sign.` NS records at startlogic |
-| Cloudflare zone | Delete zone (or leave dormant) |
+| DocuSeal HOST env | Revert env value, `docker compose up -d` |
+| A record at startlogic | Delete the `sign` A record |
+| VPS | Destroy the VPS (Hetzner billing prorated) |
 
 ## Test plan
 
-1. **Pre-deploy:** verify `https://sign.resourcerealtygroupmi.com` returns DocuSeal home page after step 4 (no website changes yet). Confirms tunnel works.
-2. **Post-deploy:** in **Chrome incognito on a non-Tailscale network** (cellular hotspot if needed to verify it's not Tailscale-mediated), open `https://resourcerealtygroupmi.com/forms/sign-nda/`, fill name + email, click Continue.
-   - Expected: no LNA prompt; DocuSeal form loads in iframe; "Name of Recipient" auto-fills.
-3. Complete a test signing. Verify a new submission appears in DocuSeal admin and the WiseAgent webhook (`f/docuseal/nda_completed`) processes it correctly.
-4. **Safari and Firefox smoke test** — same flow, expect no regression (these browsers were already working).
-5. **Admin access regression check** — confirm `https://rrg-server.tailc01f9b.ts.net` still works for Jake's DocuSeal admin login (it should; we're adding a new host, not removing the old one).
+1. **Pre-deploy:** after step 5, `curl -I https://sign.resourcerealtygroupmi.com` returns 200 with valid cert. `curl https://sign.resourcerealtygroupmi.com/d/vjL9piBoG3jToA?name=Test&email=test@test.com` returns a 302 redirect to `/s/<slug>` (DocuSeal working).
+2. **Post-deploy:** Chrome incognito on a non-Tailscale network (cellular hotspot), open `https://resourcerealtygroupmi.com/forms/sign-nda/`, fill name + email, click Continue.
+   - Expected: NO LNA prompt; DocuSeal form loads inline; "Name of Recipient" auto-fills.
+3. Complete a test signing. Verify new submission appears in DocuSeal admin and the WiseAgent webhook (`f/docuseal/nda_completed`) processes it correctly.
+4. **Safari and Firefox smoke test** — same flow, expect no regression.
+5. **Admin access regression check** — confirm `https://rrg-server.tailc01f9b.ts.net` still works for Jake's DocuSeal admin login (we're adding a host, not removing one).
+6. **Email/PDF link spot check** — sign a test NDA, verify any post-sign emails/PDFs from DocuSeal contain links using `sign.resourcerealtygroupmi.com` (driven by `HOST` env).
 
 ## Doc updates required after deploy
 
-- Root `CLAUDE.md` — DocuSeal now publicly accessible at `sign.resourcerealtygroupmi.com` in addition to Tailscale Funnel.
-- `.claude/rules/network.md` — add Cloudflare Tunnel entry alongside other ports/services.
-- Memory: note that DNS is now managed at Cloudflare (was startlogic).
+- Root `CLAUDE.md` — DocuSeal now reachable at `sign.resourcerealtygroupmi.com` (public) in addition to Tailscale Funnel (admin).
+- `.claude/rules/network.md` — add `rrg-edge` VPS entry alongside other Tailscale machines.
+- Memory: VPS reverse proxy architecture and rationale (correct the earlier Cloudflare assumption).
 
 ## Open risks
 
-- **Cloudflare account doesn't yet exist.** Jake will need to create one and confirm email. Trivial but a step that requires Jake's hands.
-- **Cloudflare free plan subdomain-zone support unverified.** Historically free plan required apex zones in some periods. Verify before implementation. Fallback: VPS reverse proxy at ~$5/mo with A record at startlogic.
-- **NS delegation propagation.** New `sign.` NS records at startlogic will propagate over a few hours. During propagation `sign.resourcerealtygroupmi.com` may not resolve — but since nothing currently uses that hostname, no existing functionality is affected. Do the WordPress page update (step 6) only after `sign.` resolves correctly.
-- **DocuSeal session cookies under the new domain.** Existing logged-in admin sessions on the Tailscale URL won't carry to the new domain. Jake will need to re-log into DocuSeal admin under `sign.resourcerealtygroupmi.com` once. One-time only.
-- **DocuSeal `HOST` env affects signed-URL generation.** After the change, DocuSeal will generate links pointing at the new hostname. Email/PDF links sent from DocuSeal will use the new host, which is what we want, but worth confirming no hardcoded references elsewhere assume the Tailscale hostname.
+- **VPS provisioning involves Jake.** Account setup at Hetzner (or chosen provider) + payment method, ~10 min one-time.
+- **A-record propagation at startlogic.** New `sign.` A record will take minutes to a few hours to propagate. No impact on anything currently working because nothing uses that name today.
+- **Caddy auto-TLS requires the domain to resolve first** before Let's Encrypt issues the cert. If propagation is slow, retry the Caddy reload after DNS lookups succeed.
+- **DocuSeal session cookies under the new domain.** Existing logged-in admin sessions on the Tailscale URL won't carry to the new domain. Jake re-logs into DocuSeal admin under `sign.resourcerealtygroupmi.com` once. One-time.
+- **`HOST` env affects signed-URL generation.** Email/PDF links sent from DocuSeal will use the new hostname after the change — which is what we want for new submissions, but worth confirming no other integration hardcodes the Tailscale hostname.
+- **VPS becomes a small new ops surface** — needs OS patches, Tailscale upgrades, Caddy upgrades. Modest. Unattended-upgrades on Debian handles most of it.
