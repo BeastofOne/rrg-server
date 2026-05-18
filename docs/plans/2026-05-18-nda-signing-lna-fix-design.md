@@ -53,10 +53,14 @@ Considered and ruled out:
 
 Cloudflare Tunnel is free, requires no inbound ports, no data migration, and DocuSeal stays exactly where it is.
 
+## DNS scope (locked)
+
+Apex `resourcerealtygroupmi.com` and all existing records (WordPress A records, Google Workspace MX, SPF, DKIM, google-site-verification TXTs) stay at startlogic, untouched. Only the new `sign.resourcerealtygroupmi.com` subdomain is delegated to Cloudflare. Email and WordPress cannot be affected because their records remain entirely under startlogic's control.
+
 ## Changes
 
-1. **Cloudflare account setup.** Create a free Cloudflare account, add `resourcerealtygroupmi.com` as a zone. Mirror all existing DNS records from startlogic (WordPress A records, MX records, any TXT/SPF, DKIM, etc.) so that nothing breaks when nameservers switch.
-2. **Nameserver switch at startlogic.** Change NS records from `ns1/ns2.startlogic.com` → the Cloudflare-assigned nameservers. Because all records are mirrored first, this is a no-downtime change. Propagation is a few hours.
+1. **Cloudflare account setup.** Create a free Cloudflare account, add `sign.resourcerealtygroupmi.com` as its own zone (subdomain zone, not full apex). Cloudflare assigns two nameservers. **Verify before this step: Cloudflare free plan still supports subdomain zones.** If not, fallback to small VPS approach (A record for `sign.` at startlogic → VPS public IP → reverse proxy to rrg-server).
+2. **NS delegation at startlogic.** Add NS records at startlogic: `sign.resourcerealtygroupmi.com NS <cloudflare-ns-1>` and `... NS <cloudflare-ns-2>`. The startlogic apex zone and all existing records remain in place; only the new subdomain is delegated. No risk to existing email or website.
 3. **cloudflared container on rrg-server.** Add a `cloudflared` service to `deploy/docker-compose.yml` (or a new `deploy/cloudflared-docker-compose.yml`) running `cloudflared tunnel run` with a named tunnel. Tunnel configuration routes hostname `sign.resourcerealtygroupmi.com` to `http://docuseal:3000`.
 4. **Cloudflare DNS record for the tunnel.** Create a CNAME `sign` → `<tunnel-id>.cfargotunnel.com` (proxied/orange-cloud), wired to the named tunnel.
 5. **DocuSeal `HOST` env update.** Edit `deploy/docker-compose.yml` (or wherever the docuseal service is defined) to set `HOST=sign.resourcerealtygroupmi.com`. Restart the docuseal container.
@@ -72,7 +76,7 @@ Every step is independently reversible:
 | DocuSeal HOST env | Revert env value and `docker compose up -d` |
 | cloudflared container | `docker compose stop cloudflared` and remove from compose file |
 | Cloudflare DNS record | Delete CNAME in dashboard |
-| Nameserver switch | Revert NS records at startlogic back to `ns1/ns2.startlogic.com` |
+| NS delegation at startlogic | Delete the `sign.` NS records at startlogic |
 | Cloudflare zone | Delete zone (or leave dormant) |
 
 ## Test plan
@@ -93,6 +97,7 @@ Every step is independently reversible:
 ## Open risks
 
 - **Cloudflare account doesn't yet exist.** Jake will need to create one and confirm email. Trivial but a step that requires Jake's hands.
-- **Startlogic NS change may take time to propagate.** Plan to do this step during a window where 2–4 hours of DNS-in-flight is acceptable. WordPress will keep working throughout (records mirrored), but it's worth confirming.
+- **Cloudflare free plan subdomain-zone support unverified.** Historically free plan required apex zones in some periods. Verify before implementation. Fallback: VPS reverse proxy at ~$5/mo with A record at startlogic.
+- **NS delegation propagation.** New `sign.` NS records at startlogic will propagate over a few hours. During propagation `sign.resourcerealtygroupmi.com` may not resolve — but since nothing currently uses that hostname, no existing functionality is affected. Do the WordPress page update (step 6) only after `sign.` resolves correctly.
 - **DocuSeal session cookies under the new domain.** Existing logged-in admin sessions on the Tailscale URL won't carry to the new domain. Jake will need to re-log into DocuSeal admin under `sign.resourcerealtygroupmi.com` once. One-time only.
 - **DocuSeal `HOST` env affects signed-URL generation.** After the change, DocuSeal will generate links pointing at the new hostname. Email/PDF links sent from DocuSeal will use the new host, which is what we want, but worth confirming no hardcoded references elsewhere assume the Tailscale hostname.
