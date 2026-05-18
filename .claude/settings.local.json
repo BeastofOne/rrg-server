@@ -570,7 +570,10 @@
       "Bash(dig +short rrg-server.tailc01f9b.ts.net)",
       "Bash(dig AAAA +short rrg-server.tailc01f9b.ts.net)",
       "mcp__wordpress__wordpress_list_pages",
-      "mcp__wordpress__wordpress_get_page"
+      "mcp__wordpress__wordpress_get_page",
+      "Bash(dig +short NS resourcerealtygroupmi.com)",
+      "Bash(dig +short A resourcerealtygroupmi.com)",
+      "Bash(dig +short A sign.resourcerealtygroupmi.com)"
     ]
   },
   "enableAllProjectMcpServers": true,
