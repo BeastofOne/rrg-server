@@ -573,7 +573,9 @@
       "mcp__wordpress__wordpress_get_page",
       "Bash(dig +short NS resourcerealtygroupmi.com)",
       "Bash(dig +short A resourcerealtygroupmi.com)",
-      "Bash(dig +short A sign.resourcerealtygroupmi.com)"
+      "Bash(dig +short A sign.resourcerealtygroupmi.com)",
+      "Bash(nslookup rrg-server.tailc01f9b.ts.net)",
+      "Bash(echo \"exit: $?\")"
     ]
   },
   "enableAllProjectMcpServers": true,
